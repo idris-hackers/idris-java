@@ -1,0 +1,46 @@
+Name:           idris-java
+Version:        0.0.0.1
+License:        BSD3
+License-file:   LICENSE
+Author:         Jan Bessai
+Build-Type:	Simple
+Cabal-Version:  >= 1.8
+
+Executable idris-java
+  Main-is:        Main.hs
+  hs-source-dirs: src
+
+  Build-depends:  idris
+                , base
+                , containers
+                , directory
+                , filepath
+                , haskeline >= 0.7
+                , language-java >= 0.2.7 && < 0.3
+                , mtl
+                , process
+                , text
+                , transformers
+                , vector
+
+  other-modules: IRTS.CodegenJava
+
+  if os(linux)
+     cpp-options:   -DLINUX
+     build-depends: unix < 2.8
+  if os(freebsd)
+     cpp-options:   -DFREEBSD
+     build-depends: unix < 2.8
+  if os(dragonfly)
+     cpp-options:   -DDRAGONFLY
+     build-depends: unix < 2.8
+  if os(darwin)
+     cpp-options:   -DMACOSX
+     build-depends: unix < 2.8
+  if os(windows)
+     cpp-options:   -DWINDOWS
+     build-depends: Win32 < 2.4
+
+  ghc-prof-options: -auto-all -caf-all
+  ghc-options:      -threaded -rtsopts -funbox-strict-fields
+
