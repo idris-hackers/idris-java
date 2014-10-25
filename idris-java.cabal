@@ -22,8 +22,13 @@ Executable idris-java
                 , text
                 , transformers
                 , vector
+                , xml < 1.4
 
   other-modules: IRTS.CodegenJava
+               , IRTS.Java.ASTBuilding
+               , IRTS.Java.JTypes
+               , IRTS.Java.Mangling
+               , IRTS.Java.Pom
 
   if os(linux)
      cpp-options:   -DLINUX
