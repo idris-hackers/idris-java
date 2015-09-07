@@ -9,7 +9,7 @@ import           IRTS.Simplified
 
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.Error
+import           Control.Monad.Except
 import           Data.Char
 
 import           Language.Java.Parser
