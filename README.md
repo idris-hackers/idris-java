@@ -47,19 +47,19 @@ Drop me a line if you have any questions bendict.gaster at uwe.ac.uk.
 Usage
 ------
 
-In general there is no support for the default C IO monad and so while
-it will work if you only call putStrLn, for example, as it will not
+In general, there is no support for the default C IO monad and so while
+it will work if you only call `putStrLn`, for example, as it will not
 work in the general case. Instead you should import the `JAVA_IO`
-monad found in the module `JavaIO`, in the package `java`. To compile
-with the Java backend, using the `java` package use the command line:
+monad found in the module `IdrisJava`, in the package `idrisjava`. To compile
+with the Java backend, using the `idrisjava` package use the command line:
 
     idris --codegen java -p idrisjava file.idr -o a.out
 
 where *file.idr* is the Idris file to compile and *a.out* is the
 resulting *executable* program.
 
-Here is the standard hello world example (*hello.idr*), but for fun using a foreign call out to
-Java to handle the printing.
+Here is the standard hello world example (*hello.idr*), but for fun
+using a foreign call out to Java to handle the printing.
 
 ```haskell
 module Main
@@ -68,7 +68,7 @@ import IdrisJava
 
 systemoutprintln : String -> JAVA_IO ()
 systemoutprintln s
-   = foreign FFI_Java "System.out.println" (String -> JAVA_IO ()) s
+   = javacall "System.out.println" (String -> JAVA_IO ()) s
 
 main : JAVA_IO ()
 main = systemoutprintln "Hello, World!"
