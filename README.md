@@ -39,8 +39,8 @@ can be installed as an Idris package. This can be found in the
 directory libs. To install the package, simply run the following
 commands from the lib directory:
 
-    idris --build java.ipkg
-    idris --install java.ipkg
+    idris --build idrisjava.ipkg
+    idris --install idrisjava.ipkg
 
 Drop me a line if you have any questions bendict.gaster at uwe.ac.uk.
 
@@ -53,7 +53,7 @@ work in the general case. Instead you should import the `JAVA_IO`
 monad found in the module `JavaIO`, in the package `java`. To compile
 with the Java backend, using the `java` package use the command line:
 
-    idris --codegen java -p java file.idr -o a.out
+    idris --codegen java -p idrisjava file.idr -o a.out
 
 where *file.idr* is the Idris file to compile and *a.out* is the
 resulting *executable* program.
@@ -64,7 +64,7 @@ Java to handle the printing.
 ```haskell
 module Main
 
-import JavaIO
+import IdrisJava
 
 systemoutprintln : String -> JAVA_IO ()
 systemoutprintln s
@@ -76,7 +76,7 @@ main = systemoutprintln "Hello, World!"
 
 which when compiled with:
 
-    idris --codegen java -p java hello.idr -o a.out
+    idris --codegen java -p idrisjava hello.idr -o a.out
 
 produces the output:
 
