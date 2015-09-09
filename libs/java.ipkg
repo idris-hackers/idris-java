@@ -1,0 +1,4 @@
+package Java
+
+sourcedir = java
+modules   = JavaIO

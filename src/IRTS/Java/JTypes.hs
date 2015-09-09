@@ -207,14 +207,45 @@ constType _        = objectType
 -----------------------------------------------------------------------
 -- Foreign types
 
-foreignType :: FType -> Maybe J.Type
-foreignType (FArith      at) = Just $ arithTyToJType at
-foreignType (FFunction     ) = Just $ callableType
-foreignType (FFunctionIO   ) = Just $ callableType
-foreignType (FString       ) = Just $ stringType
-foreignType (FUnit         ) = Nothing
-foreignType (FPtr          ) = Just $ objectType
-foreignType (FAny          ) = Just $ objectType
+isCType :: Idris.Core.TT.Name -> Bool
+isCType (UN n ) = take 2 (str n) == "C_"
+
+isJavaType :: Idris.Core.TT.Name -> Bool
+isJavaType (UN n ) = take 5 (str n) == "Java_"
+
+-- Currently we only support Java_* types for foreign functions
+foreignType :: FDesc -> Maybe J.Type
+foreignType (FCon t)
+  | isCType t    = error ("Java backend does not (currently) support C calls")
+  | isJavaType t = Just $ foreignType' t
+  | otherwise    = error ("Java backend does not support " ++ show t)
+
+foreignType (FApp t params)
+  | isCType t            = error ("Java backend does not (currently) support for C calls")
+  | sUN "Java_IntT" == t = Just $ foreignType' t'
+  | otherwise            = error ("Java backend does not support " ++ show t)
+  where
+    FCon t' = head $ tail params
+
+foreignType FUnknown = Nothing
+
+foreignType fd = error ("fdesc not implemented yet " ++ show fd)
+
+foreignType' :: Idris.Core.TT.Name -> J.Type
+foreignType' n
+  | sUN "Java_Unit"      == n = voidType
+  | sUN "Java_Str"       == n = stringType
+  | sUN "Java_Ptr"       == n = objectType
+                               
+  | sUN "Java_Native"    == n = integerType
+  | sUN "Java_IntChar"   == n = charType
+  | sUN "Java_IntBits8"  == n = byteType
+  | sUN "Java_IntBits16" == n = shortType
+  | sUN "Java_IntBits32" == n = integerType
+  | sUN "Java_IntBits64" == n = longType                                                                
+                               
+  | sUN "Java_Any"      == n = objectType                           
+  | otherwise                = error ("unimplemented FFI Java Type: " ++ show n)
 
 -----------------------------------------------------------------------
 -- Primitive operation analysis
@@ -227,14 +258,12 @@ opName x
   | (LFloatInt to) <- x = "LFloatInt" ++ (suffixFor to)
   | (LStrInt to)   <- x = "LStrInt" ++ (suffixFor to)
   | (LChInt to)    <- x = "LChInt" ++ (suffixFor to)
---  | (LPeek to _)   <- x = "LPeek" ++ (suffixFor to)
   | otherwise = takeWhile ((/=) ' ') $ show x
   where
     suffixFor (ITFixed nt) = show nt
     suffixFor (ITNative) = show IT32
     suffixFor (ITBig) = show ITBig
     suffixFor (ITChar) = show ITChar
---    suffixFor (ITVec nt _) = "ITVec" ++ (show $ nativeTyWidth nt)
 
 sourceTypes :: PrimFn -> [J.Type]
 sourceTypes (LPlus from) = [arithTyToJType from, arithTyToJType from]
@@ -293,16 +322,7 @@ sourceTypes (LStrTail) = [stringType]
 sourceTypes (LStrCons) = [charType, stringType]
 sourceTypes (LStrIndex) = [stringType, integerType]
 sourceTypes (LStrRev) = [stringType]
--- TODO: @bgaster, handle "modern" prims for ptrs
---sourceTypes (LStdIn) = []
---sourceTypes (LStdOut) = []
---sourceTypes (LStdErr) = []
---sourceTypes (LAllocate) = [addressType]
---sourceTypes (LAppendBuffer) =
---  [bufferType, addressType, addressType, addressType, addressType, bufferType]
 sourceTypes (LSystemInfo) = [integerType]
---sourceTypes (LAppend nt _) = [bufferType, addressType, addressType, intTyToJType nt]
---sourceTypes (LPeek _ _) = [bufferType, addressType]
 sourceTypes (LFork) = [objectType]
 sourceTypes (LPar) = [objectType]
 --sourceTypes (LVMPtr) = []

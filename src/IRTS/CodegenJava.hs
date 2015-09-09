@@ -15,7 +15,7 @@ import           Util.System
 import           Control.Applicative       hiding (Const)
 import           Control.Arrow
 import           Control.Monad
-import           Control.Monad.Error
+import           Control.Monad.Except
 import qualified Control.Monad.Trans       as T
 import           Control.Monad.Trans.State
 import           Data.List                 (foldl', isSuffixOf)
@@ -480,7 +480,7 @@ mkExp pp (SConst c) =
 
 -- Foreign function calls
 -- TODO @bgaster
-mkExp pp (SForeign t fname args) = error "my friend"
+mkExp pp f@(SForeign t fname args) = mkForeign pp t fname args
 --  mkForeign pp lang resTy text params
 
 -- Primitive functions
@@ -711,6 +711,37 @@ mkConstant c@(Forgot    ) = ClassLit (Just $ objectType)
 -----------------------------------------------------------------------
 -- Foreign function calls
 
+mkForeign :: BlockPostprocessor -> FDesc -> FDesc -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
+mkForeign pp resTy@(FCon t) fname@(FStr n) params
+  | isCType t = error ("Java backend does not (currently) support for C calls")
+  | isJavaType t = mkForeignJava pp resTy n params
+  | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
+
+{-
+    do
+          method <- liftParsed (parser name n)
+          args <- foreignVarAccess params
+          wrapReturn pp resTy (call method args)
+
+-}
+
+mkForeign pp t fname args = error (show t ++ " " ++ show fname ++ " " ++ show args)
+
+mkForeignJava :: BlockPostprocessor -> FDesc -> String -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
+mkForeignJava pp resTy fname params = do
+  method <- liftParsed (parser name fname)
+  args <- foreignVarAccess params
+  wrapReturn pp resTy (call method args)
+  where
+    foreignVarAccess =
+      mapM (\(fty, var) -> (foreignType fty <>@! var))
+  
+wrapReturn pp (FCon t) exp
+  | sUN "Java_Unit" == t = ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
+  | otherwise         = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
+  where
+    pp' = rethrowAsRuntimeException pp
+    
 {-
 mkForeign :: BlockPostprocessor -> FLang -> FType -> String -> [(FType, LVar)] -> CodeGeneration [BlockStmt]
 mkForeign pp (LANG_C) resTy text params = mkForeign pp (LANG_JAVA FStatic) resTy text params
