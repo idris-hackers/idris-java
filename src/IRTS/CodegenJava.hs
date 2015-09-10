@@ -15,7 +15,7 @@ import           Util.System
 import           Control.Applicative       hiding (Const)
 import           Control.Arrow
 import           Control.Monad
-import           Control.Monad.Error
+import           Control.Monad.Except
 import qualified Control.Monad.Trans       as T
 import           Control.Monad.Trans.State
 import           Data.List                 (foldl', isSuffixOf)
@@ -46,7 +46,7 @@ codegenJava' :: [(Name, SExp)] -> -- initialization of globals
                 [String] -> -- libs
                 OutputType ->
                 IO ()
-codegenJava' globalInit defs out hdrs libs exec =
+codegenJava' globalInit defs out hdrs libs exec = do 
   withTgtDir exec out (codegenJava' exec)
   where
     codegenJava' :: OutputType -> FilePath -> IO ()
@@ -98,6 +98,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
+    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -106,7 +107,9 @@ generatePom :: FilePath -> -- tgt dir
                FilePath -> -- output target
                [String] -> -- libs
                IO ()
-generatePom tgtDir out libs = writeFile (pomFileName tgtDir) execPom
+generatePom tgtDir out libs =
+  do writeFile (pomFileName tgtDir) execPom
+     --writeFile (pomFileName "/Users/br-gaster/dev/") execPom
   where
     (Ident clsName) = either error id (mkClassName out)
     execPom = pomString clsName (takeBaseName out) libs
@@ -476,20 +479,17 @@ mkExp pp (SConst c) =
   ppExp pp $ mkConstant c
 
 -- Foreign function calls
-mkExp pp (SForeign lang resTy text params) =
-  mkForeign pp lang resTy text params
+-- TODO @bgaster
+mkExp pp f@(SForeign t fname args) = mkForeign pp t fname args
+--  mkForeign pp lang resTy text params
 
 -- Primitive functions
 mkExp pp (SOp LFork [arg]) =
   (mkThread arg) >>= ppExp pp
 mkExp pp (SOp LPar [arg]) =
   (Nothing <>@! arg) >>= ppExp pp
-mkExp pp (SOp LRegisterPtr [ptr, i]) =
-  (Nothing <>@! ptr) >>= ppExp pp
 mkExp pp (SOp LNoOp args) =
   (Nothing <>@! (last args)) >>= ppExp pp
-mkExp pp (SOp LNullPtr args) =
-  ppExp pp $ Lit Null
 mkExp pp (SOp op args) =
   (mkPrimitiveFunction op args) >>= ppExp pp
 
@@ -701,21 +701,48 @@ mkConstant c@(B8       x) = constType c <> (Lit . Word $ toInteger x)
 mkConstant c@(B16      x) = constType c <> (Lit . Word $ toInteger x)
 mkConstant c@(B32      x) = constType c <> (Lit . Word $ toInteger x)
 mkConstant c@(B64      x) = (bigInteger (show c) ~> "longValue") []
-mkConstant c@(B8V      x) = mkConstantArray (constType c) B8  x
-mkConstant c@(B16V     x) = mkConstantArray (constType c) B16 x
-mkConstant c@(B32V     x) = mkConstantArray (constType c) B32 x
-mkConstant c@(B64V     x) = mkConstantArray (constType c) B64 x
 mkConstant c@(AType    x) = ClassLit (Just $ box (constType c))
 mkConstant c@(StrType   ) = ClassLit (Just $ stringType)
-mkConstant c@(PtrType   ) = ClassLit (Just $ objectType)
-mkConstant c@(ManagedPtrType) = ClassLit (Just $ objectType)
-mkConstant c@(BufferType) = ClassLit (Just $ bufferType)
 mkConstant c@(VoidType  ) = ClassLit (Just $ voidType)
+mkConstant c@(WorldType ) = ClassLit (Just $ worldType)
+mkConstant c@(TheWorld  ) = worldType <> (Lit . Word $ toInteger 0)
 mkConstant c@(Forgot    ) = ClassLit (Just $ objectType)
 
 -----------------------------------------------------------------------
 -- Foreign function calls
 
+mkForeign :: BlockPostprocessor -> FDesc -> FDesc -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
+mkForeign pp resTy@(FCon t) fname@(FStr n) params
+  | isCType t = error ("Java backend does not (currently) support for C calls")
+  | isJavaType t = mkForeignJava pp resTy n params
+  | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
+
+{-
+    do
+          method <- liftParsed (parser name n)
+          args <- foreignVarAccess params
+          wrapReturn pp resTy (call method args)
+
+-}
+
+mkForeign pp t fname args = error (show t ++ " " ++ show fname ++ " " ++ show args)
+
+mkForeignJava :: BlockPostprocessor -> FDesc -> String -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
+mkForeignJava pp resTy fname params = do
+  method <- liftParsed (parser name fname)
+  args <- foreignVarAccess params
+  wrapReturn pp resTy (call method args)
+  where
+    foreignVarAccess =
+      mapM (\(fty, var) -> (foreignType fty <>@! var))
+  
+wrapReturn pp (FCon t) exp
+  | sUN "Java_Unit" == t = ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
+  | otherwise         = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
+  where
+    pp' = rethrowAsRuntimeException pp
+    
+{-
 mkForeign :: BlockPostprocessor -> FLang -> FType -> String -> [(FType, LVar)] -> CodeGeneration [BlockStmt]
 mkForeign pp (LANG_C) resTy text params = mkForeign pp (LANG_JAVA FStatic) resTy text params
 mkForeign pp (LANG_JAVA callType) resTy text params
@@ -741,6 +768,7 @@ mkForeign pp (LANG_JAVA callType) resTy text params
       ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
     wrapReturn _     exp =
       ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
+-}
 
 -----------------------------------------------------------------------
 -- Primitive functions

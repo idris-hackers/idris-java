@@ -29,7 +29,7 @@ java_main :: Opts -> Idris ()
 java_main opts = do elabPrims
                     loadInputs (inputs opts) Nothing
                     mainProg <- elabMain
-                    ir <- compile (Via "java") (output opts) mainProg
+                    ir <- compile (Via "java") (output opts) (Just mainProg)
                     runIO $ codegenJava ir
 
 main :: IO ()

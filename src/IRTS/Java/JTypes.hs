@@ -6,8 +6,6 @@ import           IRTS.Lang
 import           Language.Java.Syntax
 import qualified Language.Java.Syntax as J
 
-import qualified Data.Vector.Unboxed  as V
-
 -----------------------------------------------------------------------
 -- Primitive types
 
@@ -66,6 +64,10 @@ callableType =
 voidType :: J.Type
 voidType =
   RefType . ClassRefType $ ClassType [(Ident "Void", [])]
+
+worldType :: J.Type
+worldType =
+  RefType . ClassRefType $ ClassType [(Ident "Object", [])]
 
 box :: J.Type -> J.Type
 box (PrimType CharT  ) = RefType . ClassRefType $ ClassType [(Ident "Character", [])]
@@ -153,7 +155,7 @@ intTyToJType (ITFixed nt) = nativeTyToJType nt
 intTyToJType (ITNative)   = integerType
 intTyToJType (ITBig)      = bigIntegerType
 intTyToJType (ITChar)     = charType
-intTyToJType (ITVec nt _) = array $ nativeTyToJType nt
+--intTyToJType (ITVec nt _) = array $ nativeTyToJType nt
 
 arithTyToJType :: ArithTy -> J.Type
 arithTyToJType (ATInt it) = intTyToJType it
@@ -200,23 +202,50 @@ constType (B8   _) = arithTyToJType (ATInt $ ITFixed IT8 )
 constType (B16  _) = arithTyToJType (ATInt $ ITFixed IT16)
 constType (B32  _) = arithTyToJType (ATInt $ ITFixed IT32)
 constType (B64  _) = arithTyToJType (ATInt $ ITFixed IT64)
-constType (B8V  v) = arithTyToJType (ATInt . ITVec IT8 $ V.length v)
-constType (B16V v) = arithTyToJType (ATInt . ITVec IT16 $ V.length v)
-constType (B32V v) = arithTyToJType (ATInt . ITVec IT32 $ V.length v)
-constType (B64V v) = arithTyToJType (ATInt . ITVec IT64 $ V.length v)
 constType _        = objectType
 
 -----------------------------------------------------------------------
 -- Foreign types
 
-foreignType :: FType -> Maybe J.Type
-foreignType (FArith      at) = Just $ arithTyToJType at
-foreignType (FFunction     ) = Just $ callableType
-foreignType (FFunctionIO   ) = Just $ callableType
-foreignType (FString       ) = Just $ stringType
-foreignType (FUnit         ) = Nothing
-foreignType (FPtr          ) = Just $ objectType
-foreignType (FAny          ) = Just $ objectType
+isCType :: Idris.Core.TT.Name -> Bool
+isCType (UN n ) = take 2 (str n) == "C_"
+
+isJavaType :: Idris.Core.TT.Name -> Bool
+isJavaType (UN n ) = take 5 (str n) == "Java_"
+
+-- Currently we only support Java_* types for foreign functions
+foreignType :: FDesc -> Maybe J.Type
+foreignType (FCon t)
+  | isCType t    = error ("Java backend does not (currently) support C calls")
+  | isJavaType t = Just $ foreignType' t
+  | otherwise    = error ("Java backend does not support " ++ show t)
+
+foreignType (FApp t params)
+  | isCType t            = error ("Java backend does not (currently) support for C calls")
+  | sUN "Java_IntT" == t = Just $ foreignType' t'
+  | otherwise            = error ("Java backend does not support " ++ show t)
+  where
+    FCon t' = head $ tail params
+
+foreignType FUnknown = Nothing
+
+foreignType fd = error ("fdesc not implemented yet " ++ show fd)
+
+foreignType' :: Idris.Core.TT.Name -> J.Type
+foreignType' n
+  | sUN "Java_Unit"      == n = voidType
+  | sUN "Java_Str"       == n = stringType
+  | sUN "Java_Ptr"       == n = objectType
+                               
+  | sUN "Java_Native"    == n = integerType
+  | sUN "Java_IntChar"   == n = charType
+  | sUN "Java_IntBits8"  == n = byteType
+  | sUN "Java_IntBits16" == n = shortType
+  | sUN "Java_IntBits32" == n = integerType
+  | sUN "Java_IntBits64" == n = longType                                                                
+                               
+  | sUN "Java_Any"      == n = objectType                           
+  | otherwise                = error ("unimplemented FFI Java Type: " ++ show n)
 
 -----------------------------------------------------------------------
 -- Primitive operation analysis
@@ -229,14 +258,12 @@ opName x
   | (LFloatInt to) <- x = "LFloatInt" ++ (suffixFor to)
   | (LStrInt to)   <- x = "LStrInt" ++ (suffixFor to)
   | (LChInt to)    <- x = "LChInt" ++ (suffixFor to)
-  | (LPeek to _)   <- x = "LPeek" ++ (suffixFor to)
   | otherwise = takeWhile ((/=) ' ') $ show x
   where
     suffixFor (ITFixed nt) = show nt
     suffixFor (ITNative) = show IT32
     suffixFor (ITBig) = show ITBig
     suffixFor (ITChar) = show ITChar
-    suffixFor (ITVec nt _) = "ITVec" ++ (show $ nativeTyWidth nt)
 
 sourceTypes :: PrimFn -> [J.Type]
 sourceTypes (LPlus from) = [arithTyToJType from, arithTyToJType from]
@@ -277,8 +304,7 @@ sourceTypes (LFloatStr) = [doubleType]
 sourceTypes (LStrFloat) = [stringType]
 sourceTypes (LChInt _) = [charType]
 sourceTypes (LIntCh from) = [intTyToJType from]
-sourceTypes (LPrintNum) = [objectType]
-sourceTypes (LPrintStr) = [stringType]
+sourceTypes (LWriteStr) = [objectType, stringType]
 sourceTypes (LReadStr) = [objectType]
 sourceTypes (LFExp) = [doubleType]
 sourceTypes (LFLog) = [doubleType]
@@ -291,29 +317,21 @@ sourceTypes (LFATan) = [doubleType]
 sourceTypes (LFSqrt) = [doubleType]
 sourceTypes (LFFloor) = [doubleType]
 sourceTypes (LFCeil) = [doubleType]
-sourceTypes (LMkVec nt n) = replicate n (nativeTyToJType nt)
-sourceTypes (LIdxVec nt _) = [array $ nativeTyToJType nt, integerType]
-sourceTypes (LUpdateVec nt _) = [array $ nativeTyToJType nt, integerType, nativeTyToJType nt]
 sourceTypes (LStrHead) = [stringType]
 sourceTypes (LStrTail) = [stringType]
 sourceTypes (LStrCons) = [charType, stringType]
 sourceTypes (LStrIndex) = [stringType, integerType]
 sourceTypes (LStrRev) = [stringType]
-sourceTypes (LStdIn) = []
-sourceTypes (LStdOut) = []
-sourceTypes (LStdErr) = []
-sourceTypes (LAllocate) = [addressType]
-sourceTypes (LAppendBuffer) =
-  [bufferType, addressType, addressType, addressType, addressType, bufferType]
 sourceTypes (LSystemInfo) = [integerType]
-sourceTypes (LAppend nt _) = [bufferType, addressType, addressType, intTyToJType nt]
-sourceTypes (LPeek _ _) = [bufferType, addressType]
 sourceTypes (LFork) = [objectType]
 sourceTypes (LPar) = [objectType]
-sourceTypes (LVMPtr) = []
-sourceTypes (LNullPtr) = [objectType]
+--sourceTypes (LVMPtr) = []
+--sourceTypes (LNullPtr) = [objectType]
 sourceTypes (LNoOp) = repeat objectType
 
+sourceTypes (LExternal n) = []
+
+sourceTypes op = error ("non-suported op: " ++ show op)
 -----------------------------------------------------------------------
 -- Endianess markers
 
@@ -326,6 +344,6 @@ endiannessConstant c =
     endiannessConstant' (IRTS.Lang.Native) = endiannessConstant' BE
 
 endiannessArguments :: PrimFn -> [Exp]
-endiannessArguments (LAppend _ end) = [endiannessConstant end]
-endiannessArguments (LPeek _ end)   = [endiannessConstant end]
+--endiannessArguments (LAppend _ end) = [endiannessConstant end]
+--endiannessArguments (LPeek _ end)   = [endiannessConstant end]
 endiannessArguments _               = []
