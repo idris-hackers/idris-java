@@ -6,6 +6,10 @@ This is an updated version of the Java backend for Idris.
 Requirements
 ------------
 
+Make sure you have a recent version of GHC installed, this has all
+been tested with 7.10.2. If you are new to GHC, then I recomend using
+the [Haskell Platform](https://www.haskell.org/platform/).
+
 You need an update to date version of Idris, at least 0.9.19 but I
 would really get it from clone from the
 [dev branch](https://github.com/idris-lang/Idris-dev).
@@ -32,7 +36,34 @@ repository. This can be done with the following commands:
 							 -DgeneratePom=true
 
 
-Then you can build the code generator in a sandbox with Idris dev.
+Then you can build the code generator in a sandbox with Idris dev. For instance
+if you have a directory *<idris-root>* you can create a toplevel sandbox as follows:
+
+    cabal sandbox init --init .
+
+then clone idris-dev with:
+
+    git clone https://github.com/idris-lang/Idris-dev.git
+    cd Idris-dev
+	cabal sandbox init --init <idris-root>
+
+then follow the rest of the instructions on the
+[Idris wiki](https://github.com/idris-lang/Idris-dev/wiki/Installing-an-Idris-Development-version-in-a-sandbox)
+to build the compile. Note: please be sure to to build with FFI enabled.
+
+Add the *<idris-root>/bin* to your path (e.g. `export PATH=...`). Now
+your ready to build the Java code generator. Clone and bujild *idris-java* with
+the following commands:
+
+    git clone https://github.com/bgaster/idris-java.git
+    cd idris-java
+	cabal sandbox init --init <idris-root>
+	cabal install --only-dependencies
+	cabal configure
+	cabal install
+
+Assuming all went well, then you will have the executables *idris* and
+*idris-java* (along with other backends) in the directory *<idris-root>/bin*.
 
 Currently there is an absoutely bare bones Java specfic runtime, which
 can be installed as an Idris package. This can be found in the
@@ -41,8 +72,6 @@ commands from the lib directory:
 
     idris --build idrisjava.ipkg
     idris --install idrisjava.ipkg
-
-Drop me a line if you have any questions bendict.gaster at uwe.ac.uk.
 
 Usage
 ------
@@ -107,3 +136,8 @@ Here are Edwin's original commit comments:
 
 "This is extracted from the Java backend in Idris-dev. It is untested!
 Please feel free to test, maintain, etc :)."
+
+Contact
+-------
+
+Drop me a line if you have any questions bendict.gaster at uwe.ac.uk.
