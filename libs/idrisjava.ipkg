@@ -1,0 +1,4 @@
+package idrisjava
+
+modules = IdrisJava
+        , IdrisJava.Interactive

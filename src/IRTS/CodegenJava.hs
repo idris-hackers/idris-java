@@ -98,7 +98,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
-    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
+--    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -725,6 +725,11 @@ mkForeign pp resTy@(FCon t) fname@(FStr n) params
 
 -}
 
+mkForeign pp resTy@(FApp t args) fname@(FStr n) params
+  | isCType t = error ("Java backend does not (currently) support for C calls")
+  | isJavaType t = mkForeignJava pp resTy n params
+  | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
+
 mkForeign pp t fname args = error (show t ++ " " ++ show fname ++ " " ++ show args)
 
 mkForeignJava :: BlockPostprocessor -> FDesc -> String -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
@@ -739,6 +744,10 @@ mkForeignJava pp resTy fname params = do
 wrapReturn pp (FCon t) exp
   | sUN "Java_Unit" == t = ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
   | otherwise         = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
+  where
+    pp' = rethrowAsRuntimeException pp
+
+wrapReturn pp (FApp t args) exp = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
   where
     pp' = rethrowAsRuntimeException pp
     

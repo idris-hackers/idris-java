@@ -237,7 +237,7 @@ foreignType' n
   | sUN "Java_Str"       == n = stringType
   | sUN "Java_Ptr"       == n = objectType
                                
-  | sUN "Java_Native"    == n = integerType
+  | sUN "Java_IntNative" == n = integerType
   | sUN "Java_IntChar"   == n = charType
   | sUN "Java_IntBits8"  == n = byteType
   | sUN "Java_IntBits16" == n = shortType
