@@ -2,3 +2,5 @@ package idrisjava
 
 modules = IdrisJava
         , IdrisJava.Interactive
+        , IdrisJava.File
+        , IdrisJava.Strings

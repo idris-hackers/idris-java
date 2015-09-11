@@ -1,5 +1,7 @@
--- A FFI_Java/JAVA_IO port of FFI_C/IO functions in Prelude.Interactive
-
+{- 
+  Port of the FFI_C/IO functions found in Idris' Prelude.Interactive to
+  FFI_Java/JAVA_IO.
+-}
 module IdrisJava.Interactive
 
 import IdrisJava
@@ -33,8 +35,6 @@ getArgs = do n <- numArgs
     ga' acc i n = if (i == n) then (return $ reverse acc) else
                     do arg <- getArg i
                        ga' (arg :: acc) (i+1) n 
-
--- TODO: port Prelude.File FFI_C/IO to FFI_Java/JAVA_IO
 
 -- TODO: the functions replWith and repl in Prelude.Interactive are
 -- currently in IO, but I don't see why they can't be IO' ffi () and thus

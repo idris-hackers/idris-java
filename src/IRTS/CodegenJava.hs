@@ -98,7 +98,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
---    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
+    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -479,9 +479,7 @@ mkExp pp (SConst c) =
   ppExp pp $ mkConstant c
 
 -- Foreign function calls
--- TODO @bgaster
 mkExp pp f@(SForeign t fname args) = mkForeign pp t fname args
---  mkForeign pp lang resTy text params
 
 -- Primitive functions
 mkExp pp (SOp LFork [arg]) =
@@ -490,6 +488,7 @@ mkExp pp (SOp LPar [arg]) =
   (Nothing <>@! arg) >>= ppExp pp
 mkExp pp (SOp LNoOp args) =
   (Nothing <>@! (last args)) >>= ppExp pp
+  
 mkExp pp (SOp op args) =
   (mkPrimitiveFunction op args) >>= ppExp pp
 
@@ -743,7 +742,7 @@ mkForeignJava pp resTy fname params = do
   
 wrapReturn pp (FCon t) exp
   | sUN "Java_Unit" == t = ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
-  | otherwise         = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
+  | otherwise            = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
   where
     pp' = rethrowAsRuntimeException pp
 

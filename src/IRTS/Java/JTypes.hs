@@ -258,6 +258,27 @@ opName x
   | (LFloatInt to) <- x = "LFloatInt" ++ (suffixFor to)
   | (LStrInt to)   <- x = "LStrInt" ++ (suffixFor to)
   | (LChInt to)    <- x = "LChInt" ++ (suffixFor to)
+  | (LExternal si) <- x,
+    si == sUN "prim__stdin"        = "LStdIn"
+  | (LExternal si) <- x,
+    si == sUN "prim__stdout"       = "LStdOut"
+  | (LExternal si) <- x,
+    si == sUN "prim__stderr"       = "LStdErr"
+  | (LExternal si) <- x,                                
+    si == sUN "prim__eqManagedPtr" = "LEqManagedPtr"                                
+  | (LExternal si) <- x,                                
+    si == sUN "prim__eqPtr"        = "LEqManagedPtr"
+  | (LExternal si) <- x,                                                              
+    si == sUN "prim__vm"           = "LVMPtr"
+  | (LExternal si) <- x,                                                              
+    si == sUN "prim__null"         = "LNull"
+  | (LExternal si) <- x,                                                              
+    si == sUN "prim__registerPtr"  = "LRegisterPtr"
+  | (LExternal si) <- x,
+    si == sUN "prim__readFile"     = "LReadFile"                                        
+  | (LExternal si) <- x,
+    si == sUN "prim__writeFile"    = "LWriteFile"       
+
   | otherwise = takeWhile ((/=) ' ') $ show x
   where
     suffixFor (ITFixed nt) = show nt
@@ -325,11 +346,30 @@ sourceTypes (LStrRev) = [stringType]
 sourceTypes (LSystemInfo) = [integerType]
 sourceTypes (LFork) = [objectType]
 sourceTypes (LPar) = [objectType]
---sourceTypes (LVMPtr) = []
---sourceTypes (LNullPtr) = [objectType]
 sourceTypes (LNoOp) = repeat objectType
 
-sourceTypes (LExternal n) = []
+sourceTypes (LExternal n)  
+  | n == sUN "prim__readFile"   = [worldType, objectType]
+  | n == sUN "prim__writeFile"  = [worldType, objectType, stringType]                                  
+
+  | n == sUN "prim__stdin"   = []                               
+  | n == sUN "prim__stdout"  = []
+  | n == sUN "prim__stderr"  = []
+
+  -- see comment below on managed pointers                               
+  | n == sUN "prim__eqManagedPtr" = [objectType, objectType]
+  | n == sUN "prim__eqPtr" = [objectType, objectType]
+  | n == sUN "prim__vm" = [threadType]
+  | n == sUN "prim__null" = []
+                            
+-- @bgaster
+-- i can't see any reason to support managed pointers in the Java
+-- runtime, infact it seems to be counter to fact that Java is
+-- managing our allocations and lifetimes. thus the runtime will raise
+-- an exception if called
+  | n == sUN "prim__registerPtr" = [objectType, integerType]
+                             
+  | otherwise = [] --error ("unsupported builtin: " ++ show n)
 
 sourceTypes op = error ("non-suported op: " ++ show op)
 -----------------------------------------------------------------------
