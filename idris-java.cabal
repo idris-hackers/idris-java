@@ -6,7 +6,7 @@ Author:         Jan Bessai
 Build-Type:	Simple
 Cabal-Version:  >= 1.8
 
-Executable idris-java
+Executable idris-codegen-java
   Main-is:        Main.hs
   hs-source-dirs: src
 

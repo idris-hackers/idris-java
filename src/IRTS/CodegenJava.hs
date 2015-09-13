@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ViewPatterns #-}
 module IRTS.CodegenJava (codegenJava) where
 
 import           Idris.Core.TT             hiding (mkApp)
@@ -46,7 +47,7 @@ codegenJava' :: [(Name, SExp)] -> -- initialization of globals
                 [String] -> -- libs
                 OutputType ->
                 IO ()
-codegenJava' globalInit defs out hdrs libs exec = do 
+codegenJava' globalInit defs out hdrs libs exec = do
   withTgtDir exec out (codegenJava' exec)
   where
     codegenJava' :: OutputType -> FilePath -> IO ()
@@ -61,7 +62,7 @@ codegenJava' globalInit defs out hdrs libs exec = do
       invokeMvn tgtDir "compile"
       copyClassFiles tgtDir out
       cleanUpTmp tgtDir
-    codegenJava' _  tgtDir = do
+    codegenJava' Executable  tgtDir = do
         codegenJava' MavenProject tgtDir
         invokeMvn tgtDir "package";
         copyJar tgtDir out
@@ -98,7 +99,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
-    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
+--    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -710,36 +711,50 @@ mkConstant c@(Forgot    ) = ClassLit (Just $ objectType)
 -----------------------------------------------------------------------
 -- Foreign function calls
 
+-- TODO: @bgaster add support for calling C (via Java's JNI)
 mkForeign :: BlockPostprocessor -> FDesc -> FDesc -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
-mkForeign pp resTy@(FCon t) fname@(FStr n) params
-  | isCType t = error ("Java backend does not (currently) support for C calls")
-  | isJavaType t = mkForeignJava pp resTy n params
+mkForeign pp resTy@(FCon t) fname params
+  | isCType t = error ("Java backend does not (currently) support calling C")
+  | isJavaType t = mkForeignJava pp resTy fname params
   | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
 
-{-
-    do
-          method <- liftParsed (parser name n)
-          args <- foreignVarAccess params
-          wrapReturn pp resTy (call method args)
-
--}
-
-mkForeign pp resTy@(FApp t args) fname@(FStr n) params
-  | isCType t = error ("Java backend does not (currently) support for C calls")
-  | isJavaType t = mkForeignJava pp resTy n params
+mkForeign pp resTy@(FApp t args) fname params
+  | isCType t = error ("Java backend does not (currently) support calling C")
+  | isJavaType t = mkForeignJava pp resTy fname params
   | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
 
 mkForeign pp t fname args = error (show t ++ " " ++ show fname ++ " " ++ show args)
 
-mkForeignJava :: BlockPostprocessor -> FDesc -> String -> [(FDesc, LVar)] -> CodeGeneration [BlockStmt]
-mkForeignJava pp resTy fname params = do
+mkForeignJava :: BlockPostprocessor ->
+                 FDesc ->
+                 FDesc ->
+                 [(FDesc, LVar)] ->
+                 CodeGeneration [BlockStmt]
+
+mkForeignJava pp resTy (FApp (UN (T.unpack -> "JavaInvoke")) [FStr fname]) params = do
   method <- liftParsed (parser name fname)
   args <- foreignVarAccess params
   wrapReturn pp resTy (call method args)
-  where
-    foreignVarAccess =
-      mapM (\(fty, var) -> (foreignType fty <>@! var))
-  
+
+mkForeignJava pp resTy (FCon (UN (T.unpack -> "JavaNew"))) params = do
+  clsTy <- liftParsed (parser classType (nameFromReturnType resTy))
+  args <- foreignVarAccess params
+  wrapReturn pp resTy (InstanceCreation [] clsTy args Nothing)
+
+mkForeignJava pp
+              resTy
+              (FApp (UN (T.unpack -> "JavaInvokeDyn")) [FStr mname])
+              params = do
+  method <- liftParsed (parser ident mname)
+  (tgt:args) <- foreignVarAccess params
+  wrapReturn pp resTy ((tgt ~> (show $ pretty method)) args)
+
+mkForeignJava pp resTy fdesc params =
+  error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
+
+-- Some helpers
+foreignVarAccess = mapM (\(fty, var) -> (foreignType fty <>@! var))
+
 wrapReturn pp (FCon t) exp
   | sUN "Java_Unit" == t = ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
   | otherwise            = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
@@ -750,34 +765,6 @@ wrapReturn pp (FApp t args) exp = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock p
   where
     pp' = rethrowAsRuntimeException pp
     
-{-
-mkForeign :: BlockPostprocessor -> FLang -> FType -> String -> [(FType, LVar)] -> CodeGeneration [BlockStmt]
-mkForeign pp (LANG_C) resTy text params = mkForeign pp (LANG_JAVA FStatic) resTy text params
-mkForeign pp (LANG_JAVA callType) resTy text params
-  | callType <- FStatic      = do
-    method <- liftParsed (parser name text)
-    args <- foreignVarAccess params
-    wrapReturn resTy (call method args)
-  | callType <- FObject      = do
-    method <- liftParsed (parser ident text)
-    (tgt:args) <- foreignVarAccess params
-    wrapReturn resTy ((tgt ~> (show $ pretty method)) args)
-  | callType <- FConstructor = do
-    clsTy <- liftParsed (parser classType text)
-    args <- foreignVarAccess params
-    wrapReturn resTy (InstanceCreation [] clsTy args Nothing)
-  where
-    foreignVarAccess args =
-      mapM (\ (fty, var) -> (foreignType fty <>@! var)) args
-
-    pp' = rethrowAsRuntimeException pp
-
-    wrapReturn FUnit exp =
-      ((ppInnerBlock pp') [BlockStmt $ ExpStmt exp] (Lit Null)) >>= ppOuterBlock pp'
-    wrapReturn _     exp =
-      ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
--}
-
 -----------------------------------------------------------------------
 -- Primitive functions
 

@@ -28,7 +28,7 @@ stderr = FHandle prim__stderr
 ||| Call the RTS's file opening function
 do_fopen : String -> String -> JAVA_IO Ptr
 do_fopen f m
-   = foreign FFI_Java "fileOpen" (String -> String -> JAVA_IO Ptr) f m
+   = invoke "fileOpen" (String -> String -> JAVA_IO Ptr) f m
 
 ||| Open a file
 ||| @ f the filename
@@ -55,7 +55,7 @@ openFile f m = fopen f (modeStr m) where
 
 partial
 do_fclose : Ptr -> JAVA_IO ()
-do_fclose h = foreign FFI_Java "fileClose" (Ptr -> JAVA_IO ()) h
+do_fclose h = invoke "fileClose" (Ptr -> JAVA_IO ()) h
 
 partial
 closeFile : JFile -> JAVA_IO ()
@@ -64,19 +64,19 @@ closeFile (FHandle h) = do_fclose h
 -- do_fread is already lifted to IO' l String
 
 fgetc : JFile -> JAVA_IO Char
-fgetc (FHandle h) = return (cast !(foreign FFI_Java "fgetc" (Ptr -> JAVA_IO Int) h))
+fgetc (FHandle h) = return (cast !(invoke "fgetc" (Ptr -> JAVA_IO Int) h))
 
 fgetc' : JFile -> JAVA_IO (Maybe Char)
 fgetc' (FHandle h)
-   = do x <- foreign FFI_Java "fgetc" (Ptr -> JAVA_IO Int) h
+   = do x <- invoke "fgetc" (Ptr -> JAVA_IO Int) h
         if (x < 0) then return Nothing
                    else return (Just (cast x))
 
 fflush : JFile -> JAVA_IO ()
-fflush (FHandle h) = foreign FFI_Java "fflush" (Ptr -> JAVA_IO ()) h
+fflush (FHandle h) = invoke "fflush" (Ptr -> JAVA_IO ()) h
 
 do_popen : String -> String -> JAVA_IO Ptr
-do_popen f m = foreign FFI_Java "do_popen" (String -> String -> JAVA_IO Ptr) f m
+do_popen f m = invoke "do_popen" (String -> String -> JAVA_IO Ptr) f m
 
 popen : String -> Mode -> JAVA_IO JFile
 popen f m = do ptr <- do_popen f (modeStr m)
@@ -87,8 +87,7 @@ popen f m = do ptr <- do_popen f (modeStr m)
     modeStr ReadWrite = "r+"
 
 pclose : JFile -> JAVA_IO ()
-pclose (FHandle h) = foreign FFI_Java "pclose" (Ptr -> JAVA_IO ()) h
-
+pclose (FHandle h) = invoke "pclose" (Ptr -> JAVA_IO ()) h
 
 partial
 fread : JFile -> IO' l String
@@ -105,7 +104,7 @@ fwrite (FHandle h) s = do_fwrite h s
 
 partial
 do_feof : Ptr -> JAVA_IO Int
-do_feof h = foreign FFI_Java "fileEOF" (Ptr -> JAVA_IO Int) h
+do_feof h = invoke "fileEOF" (Ptr -> JAVA_IO Int) h
 
 ||| Check if a file handle has reached the end
 feof : JFile -> JAVA_IO Bool
@@ -115,14 +114,14 @@ feof (FHandle h) = do eof <- do_feof h
 
 partial
 do_ferror : Ptr -> JAVA_IO Int
-do_ferror h = foreign FFI_Java "fileError" (Ptr -> JAVA_IO Int) h
+do_ferror h = invoke "fileError" (Ptr -> JAVA_IO Int) h
 
 ferror : JFile -> JAVA_IO Bool
 ferror (FHandle h) = do err <- do_ferror h
                         return (not (err == 0))
 
 fpoll : JFile -> JAVA_IO Bool
-fpoll (FHandle h) = do p <- foreign FFI_Java "fpoll" (Ptr -> JAVA_IO Int) h
+fpoll (FHandle h) = do p <- invoke "fpoll" (Ptr -> JAVA_IO Int) h
                        return (p > 0)
 
 ||| Read the contents of a file into a string

@@ -8,7 +8,7 @@ import IdrisJava
 
 ||| Write a single character to stdout
 putChar : Char -> JAVA_IO ()
-putChar c = foreign FFI_Java "putchar" (Int -> JAVA_IO ()) (cast c)
+putChar c = invoke "putchar" (Int -> JAVA_IO ()) (cast c)
 
 ||| Write a singel character to stdout, with a trailing newline
 putCharLn : Char -> JAVA_IO ()
@@ -16,7 +16,7 @@ putCharLn c = putStrLn (singleton c)
 
 ||| Read a single character from stdin
 getChar : JAVA_IO Char
-getChar = map cast $ foreign FFI_Java "getchar" (JAVA_IO Int)
+getChar = map cast $ invoke "getchar" (JAVA_IO Int)
 
 ||| Get the command-line arguments that the program was called with.
 partial
@@ -25,10 +25,10 @@ getArgs = do n <- numArgs
              ga' [] 0 n
   where
     numArgs : JAVA_IO Int
-    numArgs = foreign FFI_Java "idris_numArgs" (JAVA_IO Int)
+    numArgs = invoke "idris_numArgs" (JAVA_IO Int)
 
     getArg : Int -> JAVA_IO String
-    getArg x = foreign FFI_Java "idris_getArg" (Int -> JAVA_IO String) x
+    getArg x = invoke "idris_getArg" (Int -> JAVA_IO String) x
 
     partial
     ga' : List String -> Int -> Int -> JAVA_IO (List String)

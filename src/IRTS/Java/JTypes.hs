@@ -1,7 +1,9 @@
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ViewPatterns #-}
 module IRTS.Java.JTypes where
 
 import           Idris.Core.TT
+import qualified Data.Text            as T
 import           IRTS.Lang
 import           Language.Java.Syntax
 import qualified Language.Java.Syntax as J
@@ -68,6 +70,10 @@ voidType =
 worldType :: J.Type
 worldType =
   RefType . ClassRefType $ ClassType [(Ident "Object", [])]
+
+userType :: String -> J.Type
+userType name =
+  RefType . ClassRefType $ ClassType [(Ident name, [])]
 
 box :: J.Type -> J.Type
 box (PrimType CharT  ) = RefType . ClassRefType $ ClassType [(Ident "Character", [])]
@@ -220,6 +226,12 @@ foreignType (FCon t)
   | isJavaType t = Just $ foreignType' t
   | otherwise    = error ("Java backend does not support " ++ show t)
 
+-- TODO: We should really construct a user class reftype as we have
+-- enough information
+foreignType ty@(FApp (UN (T.unpack -> "Java_JavaT"))
+                  [FApp (UN (T.unpack -> "JavaTyRef")) [FStr pck, FStr cl]]) =
+  Just $ userType $ nameFromReturnType ty
+
 foreignType (FApp t params)
   | isCType t            = error ("Java backend does not (currently) support for C calls")
   | sUN "Java_IntT" == t = Just $ foreignType' t'
@@ -246,6 +258,14 @@ foreignType' n
                                
   | sUN "Java_Any"      == n = objectType                           
   | otherwise                = error ("unimplemented FFI Java Type: " ++ show n)
+
+
+nameFromReturnType :: FDesc -> String
+nameFromReturnType (FApp (UN (T.unpack -> "Java_JavaT"))
+                         [FApp (UN (T.unpack -> "JavaTyRef")) [FStr pck, FStr cl]]) =
+  pck' ++ cl
+  where
+    pck' = if pck == "" then "" else pck ++ "."
 
 -----------------------------------------------------------------------
 -- Primitive operation analysis
