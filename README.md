@@ -6,6 +6,13 @@ This is an updated version of the Java backend for Idris.
 Requirements
 ------------
 
+First and formost we are jargeting Java and the JVM and an update
+version of the Java runtime and JDK must be installed, they can be
+downloaded here:
+
+* [Java SE Runtime](http://www.oracle.com/technetwork/java/javase/downloads/jre8-downloads-2133155.html)
+* [Java SE Development Kit](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
+
 Make sure you have a recent version of GHC installed, this has all
 been tested with 7.10.2. If you are new to GHC, then I recomend using
 the [Haskell Platform](https://www.haskell.org/platform/).
