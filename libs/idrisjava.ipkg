@@ -4,4 +4,4 @@ modules = IdrisJava
         , IdrisJava.Interactive
         , IdrisJava.File
         , IdrisJava.Strings
-        , IdrisJava.Builtin
+        , IdrisJava.System

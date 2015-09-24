@@ -3,6 +3,20 @@ Idris Java Backend
 
 This is an updated version of the Java backend for Idris.
 
+TODO
+-------
+
+- [ ] Java Arrays
+- [ ] Port more of the Iris libraries that relie on IO (e.g. IdrisJava.System needs finishing)
+- [ ] Read an attribute/field
+- [ ] Write an attribute/field
+- [ ] Class definitions
+- [x] Support anonymous classes
+- [ ] Allow multiple methods in an anonymous classes
+- [ ] Write basic tutorial
+- [ ] Detailed documentation
+- [ ] Setup testing framework
+
 Requirements
 ------------
 
@@ -149,3 +163,4 @@ Contact
 -------
 
 Drop me a line if you have any questions bendict.gaster at uwe.ac.uk.
+

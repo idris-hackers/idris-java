@@ -7,6 +7,7 @@ import qualified Data.Text            as T
 import           IRTS.Lang
 import           Language.Java.Syntax
 import qualified Language.Java.Syntax as J
+import Data.Maybe
 
 -----------------------------------------------------------------------
 -- Primitive types
@@ -26,6 +27,9 @@ integerType = PrimType IntT
 
 longType :: J.Type
 longType = PrimType LongT
+
+floatType :: J.Type
+floatType = PrimType FloatT
 
 doubleType :: J.Type
 doubleType = PrimType DoubleT
@@ -165,7 +169,7 @@ intTyToJType (ITChar)     = charType
 
 arithTyToJType :: ArithTy -> J.Type
 arithTyToJType (ATInt it) = intTyToJType it
-arithTyToJType (ATFloat) = doubleType
+arithTyToJType (ATFloat) = floatType
 
 -----------------------------------------------------------------------
 -- Context variables
@@ -208,6 +212,7 @@ constType (B8   _) = arithTyToJType (ATInt $ ITFixed IT8 )
 constType (B16  _) = arithTyToJType (ATInt $ ITFixed IT16)
 constType (B32  _) = arithTyToJType (ATInt $ ITFixed IT32)
 constType (B64  _) = arithTyToJType (ATInt $ ITFixed IT64)
+constType (AType ty) = arithTyToJType ty
 constType _        = objectType
 
 -----------------------------------------------------------------------
@@ -241,7 +246,7 @@ foreignType (FApp t params)
 
 foreignType FUnknown = Nothing
 
-foreignType fd = error ("fdesc not implemented yet " ++ show fd)
+foreignType fd = error ("foreignType: fdesc not implemented yet " ++ show fd)
 
 foreignType' :: Idris.Core.TT.Name -> J.Type
 foreignType' n
@@ -254,12 +259,43 @@ foreignType' n
   | sUN "Java_IntBits8"  == n = byteType
   | sUN "Java_IntBits16" == n = shortType
   | sUN "Java_IntBits32" == n = integerType
-  | sUN "Java_IntBits64" == n = longType                                                                
+  | sUN "Java_IntBits64" == n = longType
+  | sUN "Java_Float"     == n = floatType
                                
   | sUN "Java_Any"      == n = objectType                           
   | otherwise                = error ("unimplemented FFI Java Type: " ++ show n)
 
+-- the following two functions are used for calculating types of
+-- parameters and return types for methods and allocating classes
 
+-- calculate the types of the parameters, noting that the return type is
+-- discarded
+
+-- note: this is just for class definitions and so the type will arrive in a
+-- certain way and thus we don't need to check all cases
+paramTypes :: FDesc -> [J.Type]
+
+paramTypes (FApp (UN (T.unpack -> "Java_FnT")) [FUnknown, t]) =
+  paramTypes t
+
+paramTypes (FApp (UN (T.unpack -> "Java_Fn")) (FUnknown:_:params)) =
+  catMaybes $ handleParam params
+  where
+    -- we need to handle the result type special, as it can be a function or
+    -- it can be the final result type of the method being defined
+
+    handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnIO")) _)] = []
+    handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnBase")) _)] = []
+    
+    handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) (FUnknown:_:_))] =
+      map Just (paramTypes fapp)
+
+    handleParam (x:xs) =
+      foreignType x : handleParam xs
+
+paramTypes fdesc = error ("unsupported type in paramTypes: " ++ show fdesc)
+
+-- calculate the return type of a FFI type
 nameFromReturnType :: FDesc -> String
 nameFromReturnType (FApp (UN (T.unpack -> "Java_JavaT"))
                          [FApp (UN (T.unpack -> "JavaTyRef")) [FStr pck, FStr cl]]) =
@@ -267,6 +303,32 @@ nameFromReturnType (FApp (UN (T.unpack -> "Java_JavaT"))
   where
     pck' = if pck == "" then "" else pck ++ "."
 
+nameFromReturnType (FApp (UN (T.unpack -> "Java_FnT")) [FUnknown, t]) = 
+  nameFromReturnType t
+
+nameFromReturnType (FApp (UN (T.unpack -> "Java_Fn")) params) =
+  nameFromReturnType (head $ reverse params)
+
+nameFromReturnType (FApp (UN (T.unpack -> "Java_FnIO")) params) =
+    nameFromReturnType (head $ reverse params)
+
+nameFromReturnType (FApp (UN (T.unpack -> "Java_FnBase")) params) =
+    nameFromReturnType (head $ reverse params)
+
+nameFromReturnType (FCon (UN (T.unpack -> "Java_Unit"))) = "void"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_Str"))) = "String"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_Ptr"))) = "Object"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntNative"))) = "int"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntChar"))) = "char"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits8"))) = "byte"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits16"))) = "short"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits32"))) = "int"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits64"))) = "long"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_Float"))) = "float"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_Any"))) = "Object"
+
+nameFromReturnType n = error ("nameFromReturnType: unimplemented FFI: " ++ show n)
+  
 -----------------------------------------------------------------------
 -- Primitive operation analysis
 

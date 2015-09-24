@@ -23,6 +23,7 @@ import           Data.List                 (foldl', isSuffixOf)
 import qualified Data.Text                 as T
 import qualified Data.Text.IO              as TIO
 import qualified Data.Vector.Unboxed       as V
+import           Data.Maybe
 import           Language.Java.Parser
 import           Language.Java.Pretty
 import           Language.Java.Syntax      hiding (Name)
@@ -32,6 +33,7 @@ import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
+
 
 -----------------------------------------------------------------------
 -- Main function
@@ -99,7 +101,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
---    writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
+    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -110,7 +112,7 @@ generatePom :: FilePath -> -- tgt dir
                IO ()
 generatePom tgtDir out libs =
   do writeFile (pomFileName tgtDir) execPom
-     --writeFile (pomFileName "/Users/br-gaster/dev/") execPom
+--     writeFile (pomFileName "/Users/br-gaster/dev/") execPom
   where
     (Ident clsName) = either error id (mkClassName out)
     execPom = pomString clsName (takeBaseName out) libs
@@ -694,7 +696,7 @@ mkConstantArray cty elemToConst elems =
 mkConstant :: Const -> Exp
 mkConstant c@(I        x) = constType c <> (Lit . Word $ toInteger x)
 mkConstant c@(BI       x) = bigInteger (show x)
-mkConstant c@(Fl       x) = constType c <> (Lit . Double $ x)
+mkConstant c@(Fl       x) = constType c <> (Lit . Float $ x)
 mkConstant c@(Ch       x) = constType c <> (Lit . Char $ x)
 mkConstant c@(Str      x) = constType c <> (Lit . String $ x)
 mkConstant c@(B8       x) = constType c <> (Lit . Word $ toInteger x)
@@ -721,9 +723,11 @@ mkForeign pp resTy@(FCon t) fname params
 mkForeign pp resTy@(FApp t args) fname params
   | isCType t = error ("Java backend does not (currently) support calling C")
   | isJavaType t = mkForeignJava pp resTy fname params
-  | otherwise = error (show t ++ " " ++ show fname ++ " " ++ show params)
+  | otherwise =
+      error ("mkForeign" ++ show t ++ " " ++ show fname ++ " " ++ show params)
 
-mkForeign pp t fname args = error (show t ++ " " ++ show fname ++ " " ++ show args)
+mkForeign pp t fname args =
+  error ("mkForeign fall " ++ show t ++ " " ++ show fname ++ " " ++ show args)
 
 mkForeignJava :: BlockPostprocessor ->
                  FDesc ->
@@ -748,6 +752,54 @@ mkForeignJava pp
   method <- liftParsed (parser ident mname)
   (tgt:args) <- foreignVarAccess params
   wrapReturn pp resTy ((tgt ~> (show $ pretty method)) args)
+
+-- The next clause implements the allocation of a class with an
+-- overridden method, i.e. using anonymous classes.
+
+-- FIXME: @bgaster ---currently only support a single overloaded
+-- method, but it should be straightforward to allow the user to pass
+-- an array of overridden methods.
+
+mkForeignJava pp
+              resTy
+              (FApp (UN (T.unpack -> "JavaNewAnonymous")) [FStr mname])
+              ((f,l):params) = do
+  clsTy <- liftParsed (parser classType (nameFromReturnType resTy))
+  args <- foreignVarAccess params
+
+  -- create method for inner class
+  methodResTy <- liftParsed (parser resultType (nameFromReturnType f))
+
+  -- can't be an array location!
+  Right var <- varPos l
+
+  let (names, mparams) = unzip $ foldr mkVars [] $ zip [0..] $ paramTypes f
+      -- the following is slightly complicated by handling the case with arguments
+      -- and without, as one case
+      (argName, names') = if null names
+                          then ("null", [])
+                          else (head names, tail names)
+      calls = ((closure
+                (call (mangle' (sMN 0 "APPLY"))
+                 [((idrisClosureType ~> "unwrapTailCall")
+                   [foldl mkCall
+                          (mkCall (ExpName $ J.Name [var]) argName)
+                          (tail names)]), Lit Null])  ) ~> "run") []
+ 
+      (methodResTy', returnExp) = mkMethodType methodResTy
+      
+  callEx <- wrapReturn returnExp methodResTy' calls
+  let mbody   = simpleMethod [Public] methodResTy mname mparams (Block callEx)
+
+  wrapReturn pp resTy (InstanceCreation [] clsTy args (Just $ ClassBody [mbody]))
+  where
+    mkMethodType Nothing = (FCon $ sUN "Java_Unit", ignoreResult)
+    mkMethodType _       = (FCon $ sUN "Any", addReturn)
+    
+    mkVars (i,t) params = let n = mname ++ show i
+                          in (n, FormalParam [Final] t False (VarId $ Ident n)) : params
+
+    mkCall e n = call (mangle' (sMN 0 "APPLY")) [ e, jConst n ]
 
 mkForeignJava pp resTy fdesc params =
   error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
