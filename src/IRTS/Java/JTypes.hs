@@ -240,7 +240,7 @@ foreignType ty@(FApp (UN (T.unpack -> "Java_JavaT"))
 foreignType (FApp t params)
   | isCType t            = error ("Java backend does not (currently) support for C calls")
   | sUN "Java_IntT" == t = Just $ foreignType' t'
-  | otherwise            = error ("Java backend does not support " ++ show t)
+  | otherwise            = error ("foreignType: Java backend does not support " ++ show t ++ " " ++ show params)
   where
     FCon t' = head $ tail params
 
@@ -278,7 +278,7 @@ paramTypes :: FDesc -> [J.Type]
 paramTypes (FApp (UN (T.unpack -> "Java_FnT")) [FUnknown, t]) =
   paramTypes t
 
-paramTypes (FApp (UN (T.unpack -> "Java_Fn")) (FUnknown:_:params)) =
+paramTypes (FApp (UN (T.unpack -> "Java_Fn")) (_:_:params)) =
   catMaybes $ handleParam params
   where
     -- we need to handle the result type special, as it can be a function or
@@ -287,10 +287,13 @@ paramTypes (FApp (UN (T.unpack -> "Java_Fn")) (FUnknown:_:params)) =
     handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnIO")) _)] = []
     handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnBase")) _)] = []
     
-    handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) (FUnknown:_:_))] =
+    handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) (_:_:_))] =
       map Just (paramTypes fapp)
 
-    handleParam (x:xs) =
+--    handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) _)] =
+--      error ("handleParam " ++ show fapp)
+
+    handleParam (x:xs) = 
       foreignType x : handleParam xs
 
 paramTypes fdesc = error ("unsupported type in paramTypes: " ++ show fdesc)
