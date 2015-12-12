@@ -779,15 +779,15 @@ mkForeignJava pp
       (argName, names') = if null names
                           then ("null", [])
                           else (head names, tail names)
-      calls = ((closure
-                (call (mangle' (sMN 0 "APPLY"))
-                 [((idrisClosureType ~> "unwrapTailCall")
-                   [foldl mkCall
-                          (mkCall (ExpName $ J.Name [var]) argName)
-                          (tail names)]), Lit Null])  ) ~> "run") []
- 
+      calls = ((idrisClosureType ~> "unwrapTailCall")
+              [call (mangle' (sMN 0 "APPLY"))
+                              [((idrisClosureType ~> "unwrapTailCall")
+                                [foldl mkCall
+                                       (mkCall (ExpName $ J.Name [var]) argName)
+                                       (tail names)]), Lit Null]])
+
       (methodResTy', returnExp) = mkMethodType methodResTy
-      
+
   callEx <- wrapReturn returnExp methodResTy' calls
   let mbody   = simpleMethod [Public] methodResTy mname mparams (Block callEx)
 
