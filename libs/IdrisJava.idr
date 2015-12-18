@@ -53,6 +53,7 @@ namespace FFI_Java
        Java_IntBits16 : Java_IntTypes Bits16
        Java_IntBits32 : Java_IntTypes Bits32
        Java_IntBits64 : Java_IntTypes Bits64
+       Java_IntBigInt : Java_IntTypes Integer
 
     data Java_FnTypes : Type -> Type where
        Java_Fn     : Java_Types s -> Java_FnTypes t -> Java_FnTypes (s -> t)
@@ -62,7 +63,7 @@ namespace FFI_Java
     ||| Supported Java foreign types
     data Java_Types : Type -> Type where
        Java_Str   : Java_Types String
-       Java_Float : Java_Types Float
+       Java_Float : Java_Types Double
        Java_Ptr   : Java_Types Ptr
        Java_Unit  : Java_Types ()
        Java_JavaT : Java_Types (Java a)
@@ -111,3 +112,17 @@ newanonymous : String -> (ty : Type) -> {auto fty : FTy FFI_Java [] ty} -> ty
 newanonymous name ty = foreign FFI_Java (JavaNewAnonymous name) ty
 
 class IsA a b where {}
+
+JavaBoolean : Type
+JavaBoolean = Java (JavaTyRef "java.lang" "Boolean")
+
+boolToJavaBoolean : Bool -> JAVA_IO JavaBoolean
+boolToJavaBoolean False = invoke "longToBool" (Int -> JAVA_IO JavaBoolean) 0
+boolToJavaBoolean True = invoke "longToBool" (Int -> JAVA_IO JavaBoolean) 1
+
+javaBooleanToBool : JavaBoolean -> JAVA_IO Bool
+javaBooleanToBool b = do
+  i <- invoke "boolToLong" (JavaBoolean -> JAVA_IO Int) b
+  return (if i <=0 then False else True)
+                      
+

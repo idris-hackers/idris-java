@@ -101,7 +101,7 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
-    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
+    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -116,7 +116,7 @@ generatePom tgtDir out libs =
   where
     (Ident clsName) = either error id (mkClassName out)
     execPom = pomString clsName (takeBaseName out) libs
-  
+
 
 invokeMvn :: FilePath -> String -> IO ()
 invokeMvn tgtDir command = do
@@ -491,7 +491,7 @@ mkExp pp (SOp LPar [arg]) =
   (Nothing <>@! arg) >>= ppExp pp
 mkExp pp (SOp LNoOp args) =
   (Nothing <>@! (last args)) >>= ppExp pp
-  
+
 mkExp pp (SOp op args) =
   (mkPrimitiveFunction op args) >>= ppExp pp
 
@@ -795,7 +795,7 @@ mkForeignJava pp
   where
     mkMethodType Nothing = (FCon $ sUN "Java_Unit", ignoreResult)
     mkMethodType _       = (FCon $ sUN "Any", addReturn)
-    
+
     mkVars (i,t) params = let n = mname ++ show i
                           in (n, FormalParam [Final] t False (VarId $ Ident n)) : params
 
@@ -816,7 +816,7 @@ wrapReturn pp (FCon t) exp
 wrapReturn pp (FApp t args) exp = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
   where
     pp' = rethrowAsRuntimeException pp
-    
+
 -----------------------------------------------------------------------
 -- Primitive functions
 
@@ -828,5 +828,3 @@ mkPrimitiveFunction op args =
 mkThread :: LVar -> CodeGeneration Exp
 mkThread arg =
   (\ closure -> (closure ~> "fork") []) <$> mkMethodCallClosure (sMN 0 "EVAL") [arg]
-
-

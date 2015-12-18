@@ -162,7 +162,7 @@ nativeTyToJType IT64 = longType
 
 intTyToJType :: IntTy -> J.Type
 intTyToJType (ITFixed nt) = nativeTyToJType nt
-intTyToJType (ITNative)   = integerType
+intTyToJType (ITNative)   = longType
 intTyToJType (ITBig)      = bigIntegerType
 intTyToJType (ITChar)     = charType
 --intTyToJType (ITVec nt _) = array $ nativeTyToJType nt
@@ -253,16 +253,17 @@ foreignType' n
   | sUN "Java_Unit"      == n = voidType
   | sUN "Java_Str"       == n = stringType
   | sUN "Java_Ptr"       == n = objectType
-                               
-  | sUN "Java_IntNative" == n = integerType
+
+  | sUN "Java_IntNative" == n = longType
   | sUN "Java_IntChar"   == n = charType
   | sUN "Java_IntBits8"  == n = byteType
   | sUN "Java_IntBits16" == n = shortType
   | sUN "Java_IntBits32" == n = integerType
   | sUN "Java_IntBits64" == n = longType
   | sUN "Java_Float"     == n = floatType
-                               
-  | sUN "Java_Any"      == n = objectType                           
+  | sUN "Java_IntBigInt" == n = bigIntegerType
+
+  | sUN "Java_Any"      == n = objectType
   | otherwise                = error ("unimplemented FFI Java Type: " ++ show n)
 
 -- the following two functions are used for calculating types of
@@ -286,14 +287,14 @@ paramTypes (FApp (UN (T.unpack -> "Java_Fn")) (_:_:params)) =
 
     handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnIO")) _)] = []
     handleParam [fapp@(FApp (UN (T.unpack -> "Java_FnBase")) _)] = []
-    
+
     handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) (_:_:_))] =
       map Just (paramTypes fapp)
 
 --    handleParam [fapp@(FApp (UN (T.unpack -> "Java_Fn")) _)] =
 --      error ("handleParam " ++ show fapp)
 
-    handleParam (x:xs) = 
+    handleParam (x:xs) =
       foreignType x : handleParam xs
 
 paramTypes fdesc = error ("unsupported type in paramTypes: " ++ show fdesc)
@@ -306,7 +307,7 @@ nameFromReturnType (FApp (UN (T.unpack -> "Java_JavaT"))
   where
     pck' = if pck == "" then "" else pck ++ "."
 
-nameFromReturnType (FApp (UN (T.unpack -> "Java_FnT")) [FUnknown, t]) = 
+nameFromReturnType (FApp (UN (T.unpack -> "Java_FnT")) [FUnknown, t]) =
   nameFromReturnType t
 
 nameFromReturnType (FApp (UN (T.unpack -> "Java_Fn")) params) =
@@ -321,7 +322,7 @@ nameFromReturnType (FApp (UN (T.unpack -> "Java_FnBase")) params) =
 nameFromReturnType (FCon (UN (T.unpack -> "Java_Unit"))) = "void"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_Str"))) = "String"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_Ptr"))) = "Object"
-nameFromReturnType (FCon (UN (T.unpack -> "Java_IntNative"))) = "int"
+nameFromReturnType (FCon (UN (T.unpack -> "Java_IntNative"))) = "long"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_IntChar"))) = "char"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits8"))) = "byte"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_IntBits16"))) = "short"
@@ -331,7 +332,7 @@ nameFromReturnType (FCon (UN (T.unpack -> "Java_Float"))) = "float"
 nameFromReturnType (FCon (UN (T.unpack -> "Java_Any"))) = "Object"
 
 nameFromReturnType n = error ("nameFromReturnType: unimplemented FFI: " ++ show n)
-  
+
 -----------------------------------------------------------------------
 -- Primitive operation analysis
 
@@ -349,25 +350,25 @@ opName x
     si == sUN "prim__stdout"       = "LStdOut"
   | (LExternal si) <- x,
     si == sUN "prim__stderr"       = "LStdErr"
-  | (LExternal si) <- x,                                
-    si == sUN "prim__eqManagedPtr" = "LEqManagedPtr"                                
-  | (LExternal si) <- x,                                
+  | (LExternal si) <- x,
+    si == sUN "prim__eqManagedPtr" = "LEqManagedPtr"
+  | (LExternal si) <- x,
     si == sUN "prim__eqPtr"        = "LEqManagedPtr"
-  | (LExternal si) <- x,                                                              
+  | (LExternal si) <- x,
     si == sUN "prim__vm"           = "LVMPtr"
-  | (LExternal si) <- x,                                                              
+  | (LExternal si) <- x,
     si == sUN "prim__null"         = "LNull"
-  | (LExternal si) <- x,                                                              
+  | (LExternal si) <- x,
     si == sUN "prim__registerPtr"  = "LRegisterPtr"
   | (LExternal si) <- x,
-    si == sUN "prim__readFile"     = "LReadFile"                                        
+    si == sUN "prim__readFile"     = "LReadFile"
   | (LExternal si) <- x,
-    si == sUN "prim__writeFile"    = "LWriteFile"       
+    si == sUN "prim__writeFile"    = "LWriteFile"
 
   | otherwise = takeWhile ((/=) ' ') $ show x
   where
     suffixFor (ITFixed nt) = show nt
-    suffixFor (ITNative) = show IT32
+    suffixFor (ITNative) = show IT64
     suffixFor (ITBig) = show ITBig
     suffixFor (ITChar) = show ITChar
 
@@ -433,27 +434,27 @@ sourceTypes (LFork) = [objectType]
 sourceTypes (LPar) = [objectType]
 sourceTypes (LNoOp) = repeat objectType
 
-sourceTypes (LExternal n)  
+sourceTypes (LExternal n)
   | n == sUN "prim__readFile"   = [worldType, objectType]
-  | n == sUN "prim__writeFile"  = [worldType, objectType, stringType]                                  
+  | n == sUN "prim__writeFile"  = [worldType, objectType, stringType]
 
-  | n == sUN "prim__stdin"   = []                               
+  | n == sUN "prim__stdin"   = []
   | n == sUN "prim__stdout"  = []
   | n == sUN "prim__stderr"  = []
 
-  -- see comment below on managed pointers                               
+  -- see comment below on managed pointers
   | n == sUN "prim__eqManagedPtr" = [objectType, objectType]
   | n == sUN "prim__eqPtr" = [objectType, objectType]
   | n == sUN "prim__vm" = [threadType]
   | n == sUN "prim__null" = []
-                            
+
 -- @bgaster
 -- i can't see any reason to support managed pointers in the Java
 -- runtime, infact it seems to be counter to fact that Java is
 -- managing our allocations and lifetimes. thus the runtime will raise
 -- an exception if called
   | n == sUN "prim__registerPtr" = [objectType, integerType]
-                             
+
   | otherwise = [] --error ("unsupported builtin: " ++ show n)
 
 sourceTypes op = error ("non-suported op: " ++ show op)
