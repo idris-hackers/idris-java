@@ -20,6 +20,7 @@ import           Control.Monad.Except
 import qualified Control.Monad.Trans       as T
 import           Control.Monad.Trans.State
 import           Data.List                 (foldl', isSuffixOf)
+import qualified Data.Map.Lazy             as Map
 import qualified Data.Text                 as T
 import qualified Data.Text.IO              as TIO
 import qualified Data.Vector.Unboxed       as V
@@ -321,7 +322,7 @@ mkCompilationUnit globalInit defs hdrs out = do
                             , ImportDecl False byteBuffer False
                             ] ++ otherHdrs
                           )
-                          <$> mkTypeDecl clsName globalInit defs
+                           <$> mkTypeDecl clsName globalInit defs
   where
     idrisRts = J.Name $ map Ident ["org", "idris", "rts"]
     idrisPrelude = J.Name $ map Ident ["org", "idris", "rts", "Prelude"]
@@ -338,6 +339,10 @@ mkCompilationUnit globalInit defs hdrs out = do
 -----------------------------------------------------------------------
 -- Main class
 
+invertNamespace :: (Name, SDecl) -> (Name, SDecl)
+invertNamespace ((NS name nss),decl) = ((NS name (reverse nss)),decl)
+invertNamespace (n,decl) = (n,decl)
+
 mkTypeDecl :: Ident -> [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration [TypeDecl]
 mkTypeDecl name globalInit defs =
   (\ body -> [ClassTypeDecl $ ClassDecl [ Public
@@ -350,13 +355,13 @@ mkTypeDecl name globalInit defs =
               Nothing
               []
               body])
-  <$> mkClassBody globalInit (map (second (prefixCallNamespaces name)) defs)
+  <$> mkNamespaceClass (collectDecls (map invertNamespace defs))
 
-mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
-mkClassBody globalInit defs =
-  (\ globals defs -> ClassBody . (globals++) . addMainMethod . mergeInnerClasses $ defs)
-  <$> mkGlobalContext globalInit
-  <*> mapM mkDecl defs
+-- mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
+-- mkClassBody globalInit defs =
+--   (\ globals defs -> ClassBody . (globals++) . addMainMethod {- .  mergeInnerClasses -} $ defs)
+--   <$> mkGlobalContext globalInit
+--   <*> mapM mkDecl defs
 
 mkGlobalContext :: [(Name, SExp)] -> CodeGeneration [Decl]
 mkGlobalContext [] = return []
@@ -398,36 +403,33 @@ mkMainMethod =
             , BlockStmt . ExpStmt $ call (mangle' (sMN 0 "runMain")) []
             ]
 
------------------------------------------------------------------------
--- Inner classes (idris namespaces)
+data NamespaceClass = NamespaceClass [SDecl] (Map.Map T.Text NamespaceClass)
 
-mergeInnerClasses :: [Decl] -> [Decl]
-mergeInnerClasses = foldl' mergeInner []
+collectDecls :: [(Name, SDecl)] -> NamespaceClass
+collectDecls = foldl' insertDecl (NamespaceClass [] Map.empty)
   where
-    mergeInner ((decl@(MemberDecl (MemberClassDecl (ClassDecl priv name targs ext imp (ClassBody body))))):decls)
-               decl'@(MemberDecl (MemberClassDecl (ClassDecl _ name' _ ext' imp' (ClassBody body'))))
-      | name == name' =
-        (MemberDecl $ MemberClassDecl $
-                    ClassDecl priv
-                              name
-                              targs
-                              (mplus ext ext')
-                              (imp ++ imp')
-                              (ClassBody $ mergeInnerClasses (body ++ body')))
-        : decls
-      | otherwise = decl:(mergeInner decls decl')
-    mergeInner (decl:decls) decl' = decl:(mergeInner decls decl')
-    mergeInner [] decl' = [decl']
+    insertDecl :: NamespaceClass -> (Name,SDecl) -> NamespaceClass
+    insertDecl (NamespaceClass decls nsMap) ((NS name (ns:nss)),decl) =
+      let nsCls = Map.findWithDefault (NamespaceClass [] Map.empty) ns nsMap
+          nsCls' = insertDecl nsCls (NS name nss,decl)
+      in (NamespaceClass decls (Map.insert ns nsCls' nsMap))
+    insertDecl (NamespaceClass decls nsMap) (_,decl) =
+      NamespaceClass (decl:decls) nsMap
+
+mkInnerClass :: (T.Text, NamespaceClass) -> CodeGeneration Decl
+mkInnerClass (ns,nsCls) =
+  (\body -> (MemberDecl (MemberClassDecl (ClassDecl [Public, Static] (Ident (T.unpack ns)) [] Nothing [] body))))
+  <$> mkNamespaceClass nsCls
+
+mkNamespaceClass :: NamespaceClass -> CodeGeneration ClassBody
+mkNamespaceClass (NamespaceClass decls nsMap) =
+  (\decls decls' -> ClassBody (decls ++ decls'))
+  <$> mapM mkDecl decls
+  <*> mapM mkInnerClass (Map.toList nsMap)
 
 
-
-mkDecl :: (Name, SDecl) -> CodeGeneration Decl
-mkDecl ((NS n (ns:nss)), decl) =
-  (\ name body ->
-    MemberDecl $ MemberClassDecl $ ClassDecl [Public, Static] name [] Nothing [] body)
-  <$> mangle (UN ns)
-  <*> mkClassBody [] [(NS n nss, decl)]
-mkDecl (_, SFun name params stackSize body) = do
+mkDecl :: SDecl -> CodeGeneration Decl
+mkDecl (SFun name params stackSize body) = do
   (Ident methodName) <- mangle name
   methodParams <- mapM mkFormalParam params
   paramNames <- mapM mangle params

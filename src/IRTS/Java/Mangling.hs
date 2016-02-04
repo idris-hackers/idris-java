@@ -18,7 +18,6 @@ import           Language.Java.Syntax hiding (Name)
 import qualified Language.Java.Syntax as J
 
 import           System.FilePath
-import           Debug.Trace
 
 prefixCallNamespaces :: Ident -> SDecl -> SDecl
 prefixCallNamespaces name (SFun fname args i e) =
@@ -66,27 +65,27 @@ mangleWithPrefix prefix (UN name) =
   $ cleanWs False (str name)
   where
     cleanNonLetter (x:xs)
-      | x == '#' = "_Hash" ++ cleanNonLetter xs
-      | x == '@' = "_At" ++ cleanNonLetter xs
-      | x == '$' = "_Dollar" ++ cleanNonLetter xs
-      | x == '!' = "_Bang" ++ cleanNonLetter xs
-      | x == '.' = "_Dot" ++ cleanNonLetter xs
-      | x == '\'' = "_Prime" ++ cleanNonLetter xs
-      | x == '*' = "_Times" ++ cleanNonLetter xs
-      | x == '+' = "_Plus" ++ cleanNonLetter xs
-      | x == '/' = "_Divide" ++ cleanNonLetter xs
-      | x == '-' = "_Minus" ++ cleanNonLetter xs
-      | x == '%' = "_Mod" ++ cleanNonLetter xs
-      | x == '<' = "_LessThan" ++ cleanNonLetter xs
-      | x == '=' = "_Equals" ++ cleanNonLetter xs
-      | x == '>' = "_MoreThan" ++ cleanNonLetter xs
-      | x == '[' = "_LSBrace" ++ cleanNonLetter xs
-      | x == ']' = "_RSBrace" ++ cleanNonLetter xs
-      | x == '(' = "_LBrace" ++ cleanNonLetter xs
-      | x == ')' = "_RBrace" ++ cleanNonLetter xs
-      | x == ':' = "_Colon" ++ cleanNonLetter xs
-      | x == ' ' = "_Space" ++ cleanNonLetter xs
-      | x == ',' = "_Comma" ++ cleanNonLetter xs
+      | x == '#' = "_HASH_" ++ cleanNonLetter xs
+      | x == '@' = "_AT_" ++ cleanNonLetter xs
+      | x == '$' = "_DOLLAR_" ++ cleanNonLetter xs
+      | x == '!' = "_BANG_" ++ cleanNonLetter xs
+      | x == '.' = "_DOT_" ++ cleanNonLetter xs
+      | x == '\'' = "_PRIME_" ++ cleanNonLetter xs
+      | x == '*' = "_TIMES_" ++ cleanNonLetter xs
+      | x == '+' = "_PLUS_" ++ cleanNonLetter xs
+      | x == '/' = "_DIVIDE_" ++ cleanNonLetter xs
+      | x == '-' = "_MINUS_" ++ cleanNonLetter xs
+      | x == '%' = "_MOD_" ++ cleanNonLetter xs
+      | x == '<' = "_LESSTHAN_" ++ cleanNonLetter xs
+      | x == '=' = "_EQUALS_" ++ cleanNonLetter xs
+      | x == '>' = "_MORETHAN_" ++ cleanNonLetter xs
+      | x == '[' = "_LSBRACE_" ++ cleanNonLetter xs
+      | x == ']' = "_RSBRACE_" ++ cleanNonLetter xs
+      | x == '(' = "_LBRACE_" ++ cleanNonLetter xs
+      | x == ')' = "_RBRACE_" ++ cleanNonLetter xs
+      | x == ':' = "_COLON_" ++ cleanNonLetter xs
+      | x == ' ' = "_SPACE_" ++ cleanNonLetter xs
+      | x == ',' = "_COMMA_" ++ cleanNonLetter xs
       | x == '_' = "__" ++ cleanNonLetter xs
       -- 10 digits is the most possible to represent 2^32 (ie all of unicode)
       | not (isAlphaNum x) = "_" ++ (padToWith 10 '0' . show $ ord x) ++ cleanNonLetter xs
@@ -102,15 +101,16 @@ mangleWithPrefix prefix (UN name) =
 mangleWithPrefix prefix s@(SN _) = mangleWithPrefix prefix (sUN (showCG s))
 
 mangle :: (Applicative m, MonadError String m) => Name -> m Ident
-mangle = mangleWithPrefix "__IDRCG__"
+mangle = mangleWithPrefix "IDR_"
 
 mangle' :: Name -> Ident
-mangle' = either error id . mangleWithPrefix "__IDRCG__"
+mangle' = either error id . mangleWithPrefix "IDR_"
 
 mangleFull :: (Applicative m, MonadError String m) => Name -> m J.Name
-mangleFull (NS name (rootns:nss)) =
-  (\ r n ns -> J.Name (r:(ns ++ [n])))
+mangleFull (NS name namespace) =
+  let  (rootns:nss) = reverse namespace
+  in (\ r n ns -> J.Name (r:(ns ++ [n])))
   <$> mangleWithPrefix "" (UN rootns)
   <*> mangle name
-  <*> mapM (mangle . UN) nss
+  <*> mapM (mangleWithPrefix "" . UN) nss
 mangleFull n = J.Name . (:[]) <$> mangle n
