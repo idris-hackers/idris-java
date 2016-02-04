@@ -2,7 +2,7 @@
 {-# LANGUAGE ViewPatterns #-}
 module IRTS.CodegenJava (codegenJava) where
 
-import           Idris.Core.TT             hiding (mkApp)
+import           Debug.Trace
 import           IRTS.CodegenCommon
 import           IRTS.Java.ASTBuilding
 import           IRTS.Java.JTypes
@@ -11,24 +11,25 @@ import           IRTS.Java.Pom (pomString)
 import           IRTS.Lang
 import           IRTS.Simplified
 import           IRTS.System
+import           Idris.Core.TT hiding (mkApp)
 import           Util.System
 
-import           Control.Applicative       hiding (Const)
+import           Control.Applicative hiding (Const)
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Except
-import qualified Control.Monad.Trans       as T
+import qualified Control.Monad.Trans as T
 import           Control.Monad.Trans.State
-import           Data.List                 (foldl', isSuffixOf)
-import qualified Data.Map.Lazy             as Map
-import qualified Data.Text                 as T
-import qualified Data.Text.IO              as TIO
-import qualified Data.Vector.Unboxed       as V
+import           Data.List (foldl', isSuffixOf)
+import qualified Data.Map.Lazy as Map
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import qualified Data.Vector.Unboxed as V
 import           Data.Maybe
 import           Language.Java.Parser
 import           Language.Java.Pretty
-import           Language.Java.Syntax      hiding (Name)
-import qualified Language.Java.Syntax      as J
+import           Language.Java.Syntax hiding (Name)
+import qualified Language.Java.Syntax as J
 import           System.Directory
 import           System.Exit
 import           System.FilePath
@@ -102,7 +103,6 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
-    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -355,7 +355,7 @@ mkTypeDecl name globalInit defs =
               Nothing
               []
               body])
-  <$> mkNamespaceClass (collectDecls (map invertNamespace defs))
+  <$> mkRootClass (collectDecls (map invertNamespace defs))
 
 -- mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
 -- mkClassBody globalInit defs =
@@ -405,9 +405,19 @@ mkMainMethod =
 
 data NamespaceClass = NamespaceClass [SDecl] (Map.Map T.Text NamespaceClass)
 
-collectDecls :: [(Name, SDecl)] -> NamespaceClass
-collectDecls = foldl' insertDecl (NamespaceClass [] Map.empty)
+data RootClass = RootClass NamespaceClass (Maybe SDecl) (Maybe SDecl)
+
+collectDecls :: [(Name, SDecl)] -> RootClass
+collectDecls = foldl' accumDecl (RootClass (NamespaceClass [] Map.empty) Nothing Nothing)
   where
+    accumDecl :: RootClass -> (Name,SDecl) -> RootClass
+    accumDecl (RootClass nsCls apply eval) (MN 0 (T.unpack-> "APPLY"),decl) =
+      RootClass nsCls (Just decl) eval
+    accumDecl (RootClass nsCls apply eval) (MN 0 (T.unpack-> "EVAL"),decl) =
+      RootClass nsCls apply (Just decl)
+    accumDecl (RootClass nsCls apply eval) pair =
+      RootClass (insertDecl nsCls pair) apply eval
+
     insertDecl :: NamespaceClass -> (Name,SDecl) -> NamespaceClass
     insertDecl (NamespaceClass decls nsMap) ((NS name (ns:nss)),decl) =
       let nsCls = Map.findWithDefault (NamespaceClass [] Map.empty) ns nsMap
@@ -427,6 +437,80 @@ mkNamespaceClass (NamespaceClass decls nsMap) =
   <$> mapM mkDecl decls
   <*> mapM mkInnerClass (Map.toList nsMap)
 
+concatMapM  :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
+concatMapM f xs  = liftM concat (mapM f xs)
+
+mkApply :: SDecl -> CodeGeneration [Decl]
+mkApply decl@(SFun name fparams stackSize (SChkCase var alts)) = do
+  applyFn <- mkApplyFn
+  altFns <- concatMapM mkApplyAltFn alts
+  pure (applyFn:altFns)
+  where
+    mkApplyFn :: CodeGeneration Decl
+    mkApplyFn = do
+        methodParams <- mapM mkFormalParam fparams
+        paramNames <- mapM mangle fparams
+        pushParams paramNames
+        switchExp <- mkGetConstructorId False var
+        caseCalls <- mapM mkCaseCall alts
+        popScope
+        pure (MemberDecl
+              (MethodDecl [Public,Static] [] (Just objectType)
+               (Ident "IDR_APPLY_0")
+                methodParams []
+                (MethodBody
+                 (Just
+                  (Block [BlockStmt $ Switch switchExp caseCalls])))))
+
+    altFnName :: Int -> Ident
+    altFnName consIndex = Ident ("APPLY_0$" ++ show consIndex)
+
+    mkCaseCall :: SAlt -> CodeGeneration SwitchBlock
+    mkCaseCall cs@(SConCase _ consIndex _ _ _) = do
+      arg0 <- Nothing <>@! Loc 0
+      arg1 <- Nothing <>@! Loc 1
+      pure
+       (SwitchBlock (SwitchCase $ jInt consIndex)
+         [BlockStmt
+          (Return (Just (MethodInv
+                         (MethodCall (J.Name [altFnName consIndex])
+                          [arg0,arg1]))))])
+    mkCaseCall (SDefaultCase exp) = do
+      pushScope
+      stmt <- mkExp addReturn exp
+      popScope
+      pure (SwitchBlock Default stmt)
+
+    mkApplyAltFn :: SAlt -> CodeGeneration [Decl]
+    mkApplyAltFn cs@(SConCase parentStackPos consIndex _ params branchExpression) = do
+      methodParams <- mapM mkFormalParam fparams
+      paramNames <- mapM mangle fparams
+      pushParams paramNames
+      pushScope
+      caseBranch <- mkCaseBinding addReturn var parentStackPos params branchExpression
+      popScope
+      popScope
+      pure
+       [MemberDecl
+        (MethodDecl [Public,Static] [] (Just objectType)
+         (altFnName consIndex)
+        methodParams [] (MethodBody (Just (Block caseBranch))))]
+    mkApplyAltFn _ = pure []
+mkApply _ = pure []
+
+mkEval :: SDecl -> CodeGeneration [Decl]
+mkEval decl@(SFun name params stackSize body) = pure []
+
+mkRootClass :: RootClass -> CodeGeneration ClassBody
+mkRootClass (RootClass (NamespaceClass decls nsMap) mApply mEval) =
+  (\decls decls' applyDecls evalDecls
+   -> ClassBody (decls ++ decls' ++
+                 fromMaybe [] applyDecls ++
+                 fromMaybe [] evalDecls))
+  <$> mapM mkDecl decls
+  <*> mapM mkInnerClass (Map.toList nsMap)
+  <*> mapM mkApply mApply
+  <*> mapM mkEval mEval
 
 mkDecl :: SDecl -> CodeGeneration Decl
 mkDecl (SFun name params stackSize body) = do
