@@ -526,7 +526,7 @@ mkRootClass globalInit (RootClass (NamespaceClass decls nsMap) mApply mEval have
                 else []
   pure (ClassBody
         (globals ++
-         (addMainMethod decls) ++
+         decls ++
          innerClasses ++
          fromMaybe [] apply ++
          fromMaybe [] eval ++
