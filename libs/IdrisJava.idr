@@ -18,26 +18,30 @@ namespace FFI_Java
     (JavaTyVal ns t) == (JavaTyVal ns' t') = ns == ns' && t == t'
     _                == _                  = False
 
-  ||| A foreign descriptor.
-  data JavaForeign =
-    ||| Read the named static field of the given foreign type.
-    JavaReadField String |
-    ||| With the named field of the given foreign type.
-    JavaWriteField String |
-    ||| Call the static method of the given foreign type.
-    JavaInvoke String |
-    ||| Call the named method of the given foreign type.
-    JavaInvokeDyn String |
-    ||| Call a constructor
-    JavaNew |
-    ||| Allocate a anonymous class
-    JavaNewAnonymous String |
-    ||| Export a function under the given name.    
-    JavaExport String |
-    ||| Export a function under its original name.
-    JavaDefault   
-
   mutual
+    ||| A foreign descriptor.
+    data JavaForeign =
+        ||| Read the named static field of the given foreign type.
+        JavaReadField String |
+        ||| With the named field of the given foreign type.
+        JavaWriteField String |
+        ||| Call the static method of the given foreign type.
+        JavaInvoke String |
+        ||| Call the named method of the given foreign type.
+        JavaInvokeDyn String |
+        ||| Call a constructor
+        JavaNew |
+        ||| Allocate a anonymous class
+        JavaNewAnonymous String |
+        ||| Check whether the value is an instance of the given foreign type
+        JavaInstanceOf (Java_Types t) |
+        ||| Generate a try-catch block
+        JavaTryCatch |
+        ||| Export a function under the given name.    
+        JavaExport String |
+        ||| Export a function under its original name.
+        JavaDefault   
+
     data JavaFn : Type -> Type where
        -- code generated can assume it's compiled just as 't'
        MkJavaFn : (x : t) -> JavaFn t
@@ -124,5 +128,22 @@ javaBooleanToBool : JavaBoolean -> JAVA_IO Bool
 javaBooleanToBool b = do
   i <- invoke "boolToLong" (JavaBoolean -> JAVA_IO Int) b
   return (if i <=0 then False else True)
+  
+isNull : Ptr -> JAVA_IO Bool  
+isNull x = do javaBooleanToBool !(invoke "isNull" (Ptr -> JAVA_IO JavaBoolean) x)
+  
                       
+-- %inline
+-- instanceof :
+--   (x:t) -> {auto fty : FTy FFI_Java [] (t -> JAVA_IO JavaBoolean)} -> 
+--   (jty : Java_Types j) -> JAVA_IO Bool
+-- instanceof {t} x jty = do
+--  jbool <- foreign FFI_Java (JavaInstanceOf jty) (t -> JAVA_IO JavaBoolean) x
+ 
 
+-- %inline
+-- trycatch : {a:Type} -> {ex:Type} -> JAVA_IO a -> (ex -> JAVA_IO a) -> JAVA_IO a
+-- trycatch tryBlock catchBlock =
+--   foreign FFI_Java JavaTryCatch
+--     (JAVA_IO a -> (ex -> JAVA_IO a) -> JAVA_IO a)
+--     tryBlock catchBlock

@@ -220,9 +220,11 @@ constType _        = objectType
 
 isCType :: Idris.Core.TT.Name -> Bool
 isCType (UN n ) = take 2 (str n) == "C_"
+isCType _ = False
 
 isJavaType :: Idris.Core.TT.Name -> Bool
 isJavaType (UN n ) = take 5 (str n) == "Java_"
+isJavaType _ = False
 
 -- Currently we only support Java_* types for foreign functions
 foreignType :: FDesc -> Maybe J.Type

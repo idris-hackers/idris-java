@@ -801,6 +801,19 @@ mkForeignJava pp
 
     mkCall e n = call (mangle' (sMN 0 "APPLY")) [ e, jConst n ]
 
+mkForeignJava pp
+              resTy
+              (FApp (UN (T.unpack -> "JavaInstanceOf"))
+               [fdesc])
+              params
+  = do
+     let mty = foreignType fdesc
+     case mty of
+       Nothing -> error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
+       Just ty ->  do
+            (tgt:args) <- foreignVarAccess params
+            return [BlockStmt (ExpStmt (InstanceOf tgt (toRefType ty)))]
+
 mkForeignJava pp resTy fdesc params =
   error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
 
