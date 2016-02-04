@@ -355,7 +355,7 @@ mkTypeDecl name globalInit defs =
               Nothing
               []
               body])
-  <$> mkRootClass (collectDecls (map invertNamespace defs))
+  <$> mkRootClass globalInit (collectDecls (map invertNamespace defs))
 
 -- mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
 -- mkClassBody globalInit defs =
@@ -405,18 +405,20 @@ mkMainMethod =
 
 data NamespaceClass = NamespaceClass [SDecl] (Map.Map T.Text NamespaceClass)
 
-data RootClass = RootClass NamespaceClass (Maybe SDecl) (Maybe SDecl)
+data RootClass = RootClass NamespaceClass (Maybe SDecl) (Maybe SDecl) Bool
 
 collectDecls :: [(Name, SDecl)] -> RootClass
-collectDecls = foldl' accumDecl (RootClass (NamespaceClass [] Map.empty) Nothing Nothing)
+collectDecls = foldl' accumDecl (RootClass (NamespaceClass [] Map.empty) Nothing Nothing False)
   where
     accumDecl :: RootClass -> (Name,SDecl) -> RootClass
-    accumDecl (RootClass nsCls apply eval) (MN 0 (T.unpack-> "APPLY"),decl) =
-      RootClass nsCls (Just decl) eval
-    accumDecl (RootClass nsCls apply eval) (MN 0 (T.unpack-> "EVAL"),decl) =
-      RootClass nsCls apply (Just decl)
-    accumDecl (RootClass nsCls apply eval) pair =
-      RootClass (insertDecl nsCls pair) apply eval
+    accumDecl (RootClass nsCls apply eval haveMain) (MN 0 (T.unpack-> "APPLY"),decl) =
+      RootClass nsCls (Just decl) eval haveMain
+    accumDecl (RootClass nsCls apply eval haveMain) (MN 0 (T.unpack-> "EVAL"),decl) =
+      RootClass nsCls apply (Just decl) haveMain
+    accumDecl (RootClass nsCls apply eval haveMain) pair@(MN 0 (T.unpack-> "runMain"),decl) =
+      RootClass (insertDecl nsCls pair) apply eval True
+    accumDecl (RootClass nsCls apply eval haveMain) pair =
+      RootClass (insertDecl nsCls pair) apply eval haveMain
 
     insertDecl :: NamespaceClass -> (Name,SDecl) -> NamespaceClass
     insertDecl (NamespaceClass decls nsMap) ((NS name (ns:nss)),decl) =
@@ -440,77 +442,95 @@ mkNamespaceClass (NamespaceClass decls nsMap) =
 concatMapM  :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs  = liftM concat (mapM f xs)
 
-mkApply :: SDecl -> CodeGeneration [Decl]
-mkApply decl@(SFun name fparams stackSize (SChkCase var alts)) = do
-  applyFn <- mkApplyFn
-  altFns <- concatMapM mkApplyAltFn alts
+
+
+rangeList  :: [a] -> [Int]
+rangeList xs =
+  rangeList' 0 xs
+    where
+    rangeList'  :: Int -> [a] -> [Int]
+    rangeList' _ [] = []
+    rangeList' i (x:xs) = i : rangeList' (i + 1) xs
+
+mkApplyEval :: String -> SDecl -> CodeGeneration [Decl]
+mkApplyEval prefix (SFun name fparams stackSize (SChkCase var alts)) = do
+  applyFn <- mkApplyEvalFn
+  altFns <- concatMapM mkAltFn alts
   pure (applyFn:altFns)
   where
-    mkApplyFn :: CodeGeneration Decl
-    mkApplyFn = do
+    altFnName :: Int -> Ident
+    altFnName consIndex = Ident (prefix ++ "_0$" ++ show consIndex)
+
+    mkAltFn :: SAlt -> CodeGeneration [Decl]
+    mkAltFn cs@(SConCase parentStackPos consIndex _ params branchExpression) = do
         methodParams <- mapM mkFormalParam fparams
         paramNames <- mapM mangle fparams
         pushParams paramNames
-        switchExp <- mkGetConstructorId False var
-        caseCalls <- mapM mkCaseCall alts
+        pushScope
+        caseBranch <- mkCaseBinding addReturn var parentStackPos params branchExpression
         popScope
-        pure (MemberDecl
-              (MethodDecl [Public,Static] [] (Just objectType)
-               (Ident "IDR_APPLY_0")
-                methodParams []
-                (MethodBody
-                 (Just
-                  (Block [BlockStmt $ Switch switchExp caseCalls])))))
+        popScope
+        pure
+         [MemberDecl
+          (MethodDecl [Public,Static] [] (Just objectType)
+           (altFnName consIndex)
+          methodParams [] (MethodBody (Just (Block caseBranch))))]
+    mkAltFn _ = pure []
 
-    altFnName :: Int -> Ident
-    altFnName consIndex = Ident ("APPLY_0$" ++ show consIndex)
-
-    mkCaseCall :: SAlt -> CodeGeneration SwitchBlock
-    mkCaseCall cs@(SConCase _ consIndex _ _ _) = do
-      arg0 <- Nothing <>@! Loc 0
-      arg1 <- Nothing <>@! Loc 1
-      pure
-       (SwitchBlock (SwitchCase $ jInt consIndex)
-         [BlockStmt
-          (Return (Just (MethodInv
-                         (MethodCall (J.Name [altFnName consIndex])
-                          [arg0,arg1]))))])
-    mkCaseCall (SDefaultCase exp) = do
-      pushScope
-      stmt <- mkExp addReturn exp
-      popScope
-      pure (SwitchBlock Default stmt)
-
-    mkApplyAltFn :: SAlt -> CodeGeneration [Decl]
-    mkApplyAltFn cs@(SConCase parentStackPos consIndex _ params branchExpression) = do
+    mkApplyEvalFn :: CodeGeneration Decl
+    mkApplyEvalFn = do
+      mname <- mangle name
       methodParams <- mapM mkFormalParam fparams
       paramNames <- mapM mangle fparams
       pushParams paramNames
-      pushScope
-      caseBranch <- mkCaseBinding addReturn var parentStackPos params branchExpression
+      switchExp <- mkGetConstructorId False var
+      caseCalls <- mapM mkCaseCall alts
       popScope
-      popScope
-      pure
-       [MemberDecl
-        (MethodDecl [Public,Static] [] (Just objectType)
-         (altFnName consIndex)
-        methodParams [] (MethodBody (Just (Block caseBranch))))]
-    mkApplyAltFn _ = pure []
-mkApply _ = pure []
+      pure (MemberDecl
+              (MethodDecl [Public,Static] [] (Just objectType)
+              mname
+              methodParams []
+              (MethodBody
+                  (Just
+                  (Block [BlockStmt $ Switch switchExp caseCalls])))))
+            where
+                mkArg :: Int -> CodeGeneration Argument
+                mkArg i = Nothing <>@! Loc i
 
-mkEval :: SDecl -> CodeGeneration [Decl]
-mkEval decl@(SFun name params stackSize body) = pure []
+                mkCaseCall :: SAlt -> CodeGeneration SwitchBlock
+                mkCaseCall cs@(SConCase _ consIndex _ _ _) = do
+                 args <- mapM mkArg (rangeList fparams)
+                 pure
+                  (SwitchBlock (SwitchCase $ jInt consIndex)
+                      [BlockStmt
+                      (Return
+                      (Just
+                          (MethodInv
+                          (MethodCall (J.Name [altFnName consIndex]) args))))])
+                mkCaseCall (SDefaultCase exp) = do
+                    pushScope
+                    stmt <- mkExp addReturn exp
+                    popScope
+                    pure (SwitchBlock Default stmt)
+mkApplyEval _ _ = pure []
 
-mkRootClass :: RootClass -> CodeGeneration ClassBody
-mkRootClass (RootClass (NamespaceClass decls nsMap) mApply mEval) =
-  (\decls decls' applyDecls evalDecls
-   -> ClassBody (decls ++ decls' ++
-                 fromMaybe [] applyDecls ++
-                 fromMaybe [] evalDecls))
-  <$> mapM mkDecl decls
-  <*> mapM mkInnerClass (Map.toList nsMap)
-  <*> mapM mkApply mApply
-  <*> mapM mkEval mEval
+mkRootClass :: [(Name, SExp)] -> RootClass -> CodeGeneration ClassBody
+mkRootClass globalInit (RootClass (NamespaceClass decls nsMap) mApply mEval haveMain) = do
+  globals <- mkGlobalContext globalInit
+  decls <- mapM mkDecl decls
+  innerClasses <- mapM mkInnerClass (Map.toList nsMap)
+  apply <- mapM (mkApplyEval "APPLY") mApply
+  eval <- mapM (mkApplyEval "EVAL") mEval
+  let main = if haveMain
+                then [mkMainMethod]
+                else []
+  pure (ClassBody
+        (globals ++
+         (addMainMethod decls) ++
+         innerClasses ++
+         fromMaybe [] apply ++
+         fromMaybe [] eval ++
+         main))
 
 mkDecl :: SDecl -> CodeGeneration Decl
 mkDecl (SFun name params stackSize body) = do
