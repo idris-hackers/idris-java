@@ -1,8 +1,9 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE CPP #-}
 module IRTS.CodegenJava (codegenJava) where
 
-import           Idris.Core.TT             hiding (mkApp)
+import           Debug.Trace
 import           IRTS.CodegenCommon
 import           IRTS.Java.ASTBuilding
 import           IRTS.Java.JTypes
@@ -11,29 +12,31 @@ import           IRTS.Java.Pom (pomString)
 import           IRTS.Lang
 import           IRTS.Simplified
 import           IRTS.System
+import           Idris.Core.TT hiding (mkApp)
 import           Util.System
 
-import           Control.Applicative       hiding (Const)
+import           Control.Applicative hiding (Const)
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Except
-import qualified Control.Monad.Trans       as T
+import qualified Control.Monad.Trans as T
 import           Control.Monad.Trans.State
-import           Data.List                 (foldl', isSuffixOf)
-import qualified Data.Text                 as T
-import qualified Data.Text.IO              as TIO
-import qualified Data.Vector.Unboxed       as V
+import           Data.List (foldl', isSuffixOf)
+import qualified Data.Map.Lazy as Map
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import qualified Data.Vector.Unboxed as V
 import           Data.Maybe
 import           Language.Java.Parser
 import           Language.Java.Pretty
-import           Language.Java.Syntax      hiding (Name)
-import qualified Language.Java.Syntax      as J
+import           Language.Java.Syntax hiding (Name)
+import qualified Language.Java.Syntax as J
 import           System.Directory
 import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
-
+import           System.Environment
 
 -----------------------------------------------------------------------
 -- Main function
@@ -101,7 +104,6 @@ generateJavaFile globalInit defs hdrs srcDir out = do
                       (prettyPrint)-- flatIndent . prettyPrint)
                       (evalStateT (mkCompilationUnit globalInit defs hdrs out) mkCodeGenEnv)
     writeFile (javaFileName srcDir out) code
-    --writeFile (javaFileName "/Users/br-gaster/dev/" out) code 
 
 pomFileName :: FilePath -> FilePath
 pomFileName tgtDir = tgtDir </> "pom.xml"
@@ -116,7 +118,20 @@ generatePom tgtDir out libs =
   where
     (Ident clsName) = either error id (mkClassName out)
     execPom = pomString clsName (takeBaseName out) libs
-  
+
+mvnCommand :: String
+#ifdef mingw32_HOST_OS
+mvnCommand = "mvn.bat"
+#else
+mvnCommand = "mvn"
+#endif
+
+environment :: String -> IO (Maybe String)
+environment x = catchIO (Just <$> getEnv x)
+                        (\_ -> return Nothing)
+
+getMvn :: IO String
+getMvn = fromMaybe mvnCommand <$> environment "IDRIS_MVN"
 
 invokeMvn :: FilePath -> String -> IO ()
 invokeMvn tgtDir command = do
@@ -321,7 +336,7 @@ mkCompilationUnit globalInit defs hdrs out = do
                             , ImportDecl False byteBuffer False
                             ] ++ otherHdrs
                           )
-                          <$> mkTypeDecl clsName globalInit defs
+                           <$> mkTypeDecl clsName globalInit defs
   where
     idrisRts = J.Name $ map Ident ["org", "idris", "rts"]
     idrisPrelude = J.Name $ map Ident ["org", "idris", "rts", "Prelude"]
@@ -338,6 +353,10 @@ mkCompilationUnit globalInit defs hdrs out = do
 -----------------------------------------------------------------------
 -- Main class
 
+invertNamespace :: (Name, SDecl) -> (Name, SDecl)
+invertNamespace ((NS name nss),decl) = ((NS name (reverse nss)),decl)
+invertNamespace (n,decl) = (n,decl)
+
 mkTypeDecl :: Ident -> [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration [TypeDecl]
 mkTypeDecl name globalInit defs =
   (\ body -> [ClassTypeDecl $ ClassDecl [ Public
@@ -350,13 +369,13 @@ mkTypeDecl name globalInit defs =
               Nothing
               []
               body])
-  <$> mkClassBody globalInit (map (second (prefixCallNamespaces name)) defs)
+  <$> mkRootClass globalInit (collectDecls (map invertNamespace defs))
 
-mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
-mkClassBody globalInit defs =
-  (\ globals defs -> ClassBody . (globals++) . addMainMethod . mergeInnerClasses $ defs)
-  <$> mkGlobalContext globalInit
-  <*> mapM mkDecl defs
+-- mkClassBody :: [(Name, SExp)] -> [(Name, SDecl)] -> CodeGeneration ClassBody
+-- mkClassBody globalInit defs =
+--   (\ globals defs -> ClassBody . (globals++) . addMainMethod {- .  mergeInnerClasses -} $ defs)
+--   <$> mkGlobalContext globalInit
+--   <*> mapM mkDecl defs
 
 mkGlobalContext :: [(Name, SExp)] -> CodeGeneration [Decl]
 mkGlobalContext [] = return []
@@ -398,36 +417,137 @@ mkMainMethod =
             , BlockStmt . ExpStmt $ call (mangle' (sMN 0 "runMain")) []
             ]
 
------------------------------------------------------------------------
--- Inner classes (idris namespaces)
+data NamespaceClass = NamespaceClass [SDecl] (Map.Map T.Text NamespaceClass)
 
-mergeInnerClasses :: [Decl] -> [Decl]
-mergeInnerClasses = foldl' mergeInner []
+data RootClass = RootClass NamespaceClass (Maybe SDecl) (Maybe SDecl) Bool
+
+collectDecls :: [(Name, SDecl)] -> RootClass
+collectDecls = foldl' accumDecl (RootClass (NamespaceClass [] Map.empty) Nothing Nothing False)
   where
-    mergeInner ((decl@(MemberDecl (MemberClassDecl (ClassDecl priv name targs ext imp (ClassBody body))))):decls)
-               decl'@(MemberDecl (MemberClassDecl (ClassDecl _ name' _ ext' imp' (ClassBody body'))))
-      | name == name' =
-        (MemberDecl $ MemberClassDecl $
-                    ClassDecl priv
-                              name
-                              targs
-                              (mplus ext ext')
-                              (imp ++ imp')
-                              (ClassBody $ mergeInnerClasses (body ++ body')))
-        : decls
-      | otherwise = decl:(mergeInner decls decl')
-    mergeInner (decl:decls) decl' = decl:(mergeInner decls decl')
-    mergeInner [] decl' = [decl']
+    accumDecl :: RootClass -> (Name,SDecl) -> RootClass
+    accumDecl (RootClass nsCls apply eval haveMain) (MN 0 (T.unpack-> "APPLY"),decl) =
+      RootClass nsCls (Just decl) eval haveMain
+    accumDecl (RootClass nsCls apply eval haveMain) (MN 0 (T.unpack-> "EVAL"),decl) =
+      RootClass nsCls apply (Just decl) haveMain
+    accumDecl (RootClass nsCls apply eval haveMain) pair@(MN 0 (T.unpack-> "runMain"),decl) =
+      RootClass (insertDecl nsCls pair) apply eval True
+    accumDecl (RootClass nsCls apply eval haveMain) pair =
+      RootClass (insertDecl nsCls pair) apply eval haveMain
+
+    insertDecl :: NamespaceClass -> (Name,SDecl) -> NamespaceClass
+    insertDecl (NamespaceClass decls nsMap) ((NS name (ns:nss)),decl) =
+      let nsCls = Map.findWithDefault (NamespaceClass [] Map.empty) ns nsMap
+          nsCls' = insertDecl nsCls (NS name nss,decl)
+      in (NamespaceClass decls (Map.insert ns nsCls' nsMap))
+    insertDecl (NamespaceClass decls nsMap) (_,decl) =
+      NamespaceClass (decl:decls) nsMap
+
+mkInnerClass :: (T.Text, NamespaceClass) -> CodeGeneration Decl
+mkInnerClass (ns,nsCls) =
+  (\body -> (MemberDecl (MemberClassDecl (ClassDecl [Public, Static] (Ident (T.unpack ns)) [] Nothing [] body))))
+  <$> mkNamespaceClass nsCls
+
+mkNamespaceClass :: NamespaceClass -> CodeGeneration ClassBody
+mkNamespaceClass (NamespaceClass decls nsMap) =
+  (\decls decls' -> ClassBody (decls ++ decls'))
+  <$> mapM mkDecl decls
+  <*> mapM mkInnerClass (Map.toList nsMap)
+
+concatMapM  :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
+concatMapM f xs  = liftM concat (mapM f xs)
 
 
 
-mkDecl :: (Name, SDecl) -> CodeGeneration Decl
-mkDecl ((NS n (ns:nss)), decl) =
-  (\ name body ->
-    MemberDecl $ MemberClassDecl $ ClassDecl [Public, Static] name [] Nothing [] body)
-  <$> mangle (UN ns)
-  <*> mkClassBody [] [(NS n nss, decl)]
-mkDecl (_, SFun name params stackSize body) = do
+rangeList  :: [a] -> [Int]
+rangeList xs =
+  rangeList' 0 xs
+    where
+    rangeList'  :: Int -> [a] -> [Int]
+    rangeList' _ [] = []
+    rangeList' i (x:xs) = i : rangeList' (i + 1) xs
+
+mkApplyEval :: String -> SDecl -> CodeGeneration [Decl]
+mkApplyEval prefix (SFun name fparams stackSize (SChkCase var alts)) = do
+  applyFn <- mkApplyEvalFn
+  altFns <- concatMapM mkAltFn alts
+  pure (applyFn:altFns)
+  where
+    altFnName :: Int -> Ident
+    altFnName consIndex = Ident (prefix ++ "_0$" ++ show consIndex)
+
+    mkAltFn :: SAlt -> CodeGeneration [Decl]
+    mkAltFn cs@(SConCase parentStackPos consIndex _ params branchExpression) = do
+        methodParams <- mapM mkFormalParam fparams
+        paramNames <- mapM mangle fparams
+        pushParams paramNames
+        pushScope
+        caseBranch <- mkCaseBinding addReturn var parentStackPos params branchExpression
+        popScope
+        popScope
+        pure
+         [MemberDecl
+          (MethodDecl [Public,Static] [] (Just objectType)
+           (altFnName consIndex)
+          methodParams [] (MethodBody (Just (Block caseBranch))))]
+    mkAltFn _ = pure []
+
+    mkApplyEvalFn :: CodeGeneration Decl
+    mkApplyEvalFn = do
+      mname <- mangle name
+      methodParams <- mapM mkFormalParam fparams
+      paramNames <- mapM mangle fparams
+      pushParams paramNames
+      switchExp <- mkGetConstructorId False var
+      caseCalls <- mapM mkCaseCall alts
+      popScope
+      pure (MemberDecl
+              (MethodDecl [Public,Static] [] (Just objectType)
+              mname
+              methodParams []
+              (MethodBody
+                  (Just
+                  (Block [BlockStmt $ Switch switchExp caseCalls])))))
+            where
+                mkArg :: Int -> CodeGeneration Argument
+                mkArg i = Nothing <>@! Loc i
+
+                mkCaseCall :: SAlt -> CodeGeneration SwitchBlock
+                mkCaseCall cs@(SConCase _ consIndex _ _ _) = do
+                 args <- mapM mkArg (rangeList fparams)
+                 pure
+                  (SwitchBlock (SwitchCase $ jInt consIndex)
+                      [BlockStmt
+                      (Return
+                      (Just
+                          (MethodInv
+                          (MethodCall (J.Name [altFnName consIndex]) args))))])
+                mkCaseCall (SDefaultCase exp) = do
+                    pushScope
+                    stmt <- mkExp addReturn exp
+                    popScope
+                    pure (SwitchBlock Default stmt)
+mkApplyEval _ _ = pure []
+
+mkRootClass :: [(Name, SExp)] -> RootClass -> CodeGeneration ClassBody
+mkRootClass globalInit (RootClass (NamespaceClass decls nsMap) mApply mEval haveMain) = do
+  globals <- mkGlobalContext globalInit
+  decls <- mapM mkDecl decls
+  innerClasses <- mapM mkInnerClass (Map.toList nsMap)
+  apply <- mapM (mkApplyEval "APPLY") mApply
+  eval <- mapM (mkApplyEval "EVAL") mEval
+  let main = if haveMain
+                then [mkMainMethod]
+                else []
+  pure (ClassBody
+        (globals ++
+         decls ++
+         innerClasses ++
+         fromMaybe [] apply ++
+         fromMaybe [] eval ++
+         main))
+
+mkDecl :: SDecl -> CodeGeneration Decl
+mkDecl (SFun name params stackSize body) = do
   (Ident methodName) <- mangle name
   methodParams <- mapM mkFormalParam params
   paramNames <- mapM mangle params
@@ -491,7 +611,7 @@ mkExp pp (SOp LPar [arg]) =
   (Nothing <>@! arg) >>= ppExp pp
 mkExp pp (SOp LNoOp args) =
   (Nothing <>@! (last args)) >>= ppExp pp
-  
+
 mkExp pp (SOp op args) =
   (mkPrimitiveFunction op args) >>= ppExp pp
 
@@ -779,15 +899,15 @@ mkForeignJava pp
       (argName, names') = if null names
                           then ("null", [])
                           else (head names, tail names)
-      calls = ((closure
-                (call (mangle' (sMN 0 "APPLY"))
-                 [((idrisClosureType ~> "unwrapTailCall")
-                   [foldl mkCall
-                          (mkCall (ExpName $ J.Name [var]) argName)
-                          (tail names)]), Lit Null])  ) ~> "run") []
- 
+      calls = ((idrisClosureType ~> "unwrapTailCall")
+              [call (mangle' (sMN 0 "APPLY"))
+                              [((idrisClosureType ~> "unwrapTailCall")
+                                [foldl mkCall
+                                       (mkCall (ExpName $ J.Name [var]) argName)
+                                       (tail names)]), Lit Null]])
+
       (methodResTy', returnExp) = mkMethodType methodResTy
-      
+
   callEx <- wrapReturn returnExp methodResTy' calls
   let mbody   = simpleMethod [Public] methodResTy mname mparams (Block callEx)
 
@@ -795,11 +915,24 @@ mkForeignJava pp
   where
     mkMethodType Nothing = (FCon $ sUN "Java_Unit", ignoreResult)
     mkMethodType _       = (FCon $ sUN "Any", addReturn)
-    
+
     mkVars (i,t) params = let n = mname ++ show i
                           in (n, FormalParam [Final] t False (VarId $ Ident n)) : params
 
     mkCall e n = call (mangle' (sMN 0 "APPLY")) [ e, jConst n ]
+
+mkForeignJava pp
+              resTy
+              (FApp (UN (T.unpack -> "JavaInstanceOf"))
+               [fdesc])
+              params
+  = do
+     let mty = foreignType fdesc
+     case mty of
+       Nothing -> error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
+       Just ty ->  do
+            (tgt:args) <- foreignVarAccess params
+            return [BlockStmt (ExpStmt (InstanceOf tgt (toRefType ty)))]
 
 mkForeignJava pp resTy fdesc params =
   error ("mkFJava " ++ show resTy ++ " " ++ show fdesc ++ " " ++ show params)
@@ -816,7 +949,7 @@ wrapReturn pp (FCon t) exp
 wrapReturn pp (FApp t args) exp = ((ppInnerBlock pp') [] exp) >>= ppOuterBlock pp'
   where
     pp' = rethrowAsRuntimeException pp
-    
+
 -----------------------------------------------------------------------
 -- Primitive functions
 
@@ -828,5 +961,3 @@ mkPrimitiveFunction op args =
 mkThread :: LVar -> CodeGeneration Exp
 mkThread arg =
   (\ closure -> (closure ~> "fork") []) <$> mkMethodCallClosure (sMN 0 "EVAL") [arg]
-
-

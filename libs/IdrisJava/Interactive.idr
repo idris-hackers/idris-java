@@ -12,7 +12,7 @@ putChar c = invoke "putchar" (Int -> JAVA_IO ()) (cast c)
 
 ||| Write a singel character to stdout, with a trailing newline
 putCharLn : Char -> JAVA_IO ()
-putCharLn c = putStrLn (singleton c)
+putCharLn c = putStrLn' (singleton c)
 
 ||| Read a single character from stdin
 getChar : JAVA_IO Char
