@@ -1,16 +1,16 @@
-{- 
+{-
   Port of the FFI_C/IO functions found in Idris' Prelude.File to
   FFI_Java/JAVA_IO.
--} 
+-}
 module IdrisJava.File
 
 import IdrisJava
 import IdrisJava.Strings
 
-%access public
+%access export
 
 ||| A file handle
-abstract
+export
 data JFile = FHandle Ptr
 
 ||| Standard input
@@ -63,6 +63,9 @@ closeFile (FHandle h) = do_fclose h
 
 -- do_fread is already lifted to IO' l String
 
+do_fread : Ptr -> IO' l String
+do_fread h = prim_fread h
+
 fgetc : JFile -> JAVA_IO Char
 fgetc (FHandle h) = return (cast !(invoke "fgetc" (Ptr -> JAVA_IO Int) h))
 
@@ -97,10 +100,10 @@ partial
 do_fwrite : Ptr -> String -> JAVA_IO ()
 do_fwrite h s = do prim_fwrite h s
                    return ()
-                   
+
 partial
 fwrite : JFile -> String -> JAVA_IO ()
-fwrite (FHandle h) s = do_fwrite h s                 
+fwrite (FHandle h) s = do_fwrite h s
 
 partial
 do_feof : Ptr -> JAVA_IO Int
@@ -144,6 +147,6 @@ readFile fn = do h <- openFile fn Read
 partial -- no error checking!
 writeFile : String -> String -> JAVA_IO ()
 writeFile fn str = do
-  h <- openFile fn Write
+  h <- openFile fn WriteTruncate
   IdrisJava.File.fwrite h str
   closeFile h

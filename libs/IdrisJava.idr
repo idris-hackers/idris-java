@@ -1,6 +1,6 @@
 module IdrisJava
 
-%access public
+%access public export
 
 namespace FFI_Java
 
@@ -13,7 +13,7 @@ namespace FFI_Java
     ||| a foreign array type
     JavaTyArr JavaTy
 
-  instance Eq JavaTy where
+  Eq JavaTy where
     (JavaTyRef ns t) == (JavaTyRef ns' t') = ns == ns' && t == t'
     (JavaTyVal ns t) == (JavaTyVal ns' t') = ns == ns' && t == t'
     _                == _                  = False
@@ -115,7 +115,7 @@ new ty = foreign FFI_Java JavaNew ty
 newanonymous : String -> (ty : Type) -> {auto fty : FTy FFI_Java [] ty} -> ty
 newanonymous name ty = foreign FFI_Java (JavaNewAnonymous name) ty
 
-class IsA a b where {}
+interface IsA a b where {}
 
 JavaBoolean : Type
 JavaBoolean = Java (JavaTyRef "java.lang" "Boolean")

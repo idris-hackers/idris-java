@@ -1,5 +1,6 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE CPP #-}
 module IRTS.CodegenJava (codegenJava) where
 
 import           Debug.Trace
@@ -35,7 +36,7 @@ import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
-
+import           System.Environment
 
 -----------------------------------------------------------------------
 -- Main function
@@ -118,6 +119,19 @@ generatePom tgtDir out libs =
     (Ident clsName) = either error id (mkClassName out)
     execPom = pomString clsName (takeBaseName out) libs
 
+mvnCommand :: String
+#ifdef mingw32_HOST_OS
+mvnCommand = "mvn.bat"
+#else
+mvnCommand = "mvn"
+#endif
+
+environment :: String -> IO (Maybe String)
+environment x = catchIO (Just <$> getEnv x)
+                        (\_ -> return Nothing)
+
+getMvn :: IO String
+getMvn = fromMaybe mvnCommand <$> environment "IDRIS_MVN"
 
 invokeMvn :: FilePath -> String -> IO ()
 invokeMvn tgtDir command = do
